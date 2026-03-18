@@ -17,11 +17,16 @@
         <module>linkwork-skill-starter</module>
         <module>linkwork-storage-core</module>
         <module>linkwork-storage-starter</module>
+        <module>linkwork-sandbox-core</module>
+        <module>linkwork-k8s-starter</module>
+        <module>linkwork-mcp-core</module>
+        <module>linkwork-mcp-starter</module>
     </modules>
 
     <properties>
         <java.version>21</java.version>
         <spring.boot.version>3.2.5</spring.boot.version>
+        <fabric8.kubernetes-client.version>6.13.4</fabric8.kubernetes-client.version>
         <github.owner>momotech</github.owner>
         <github.repo>linkwork-server</github.repo>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -51,7 +56,6 @@
             </dependency>
         </dependencies>
     </dependencyManagement>
-
     <build>
         <pluginManagement>
             <plugins>
