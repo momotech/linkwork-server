@@ -35,13 +35,13 @@
     <distributionManagement>
         <repository>
             <id>github</id>
-            <name>GitHub Packages</name>
-            <url>https://maven.pkg.github.com/${github.owner}/${github.repo}</url>
+            <name>GitHub Packages - momotech/linkwork-server</name>
+            <url>https://maven.pkg.github.com/momotech/linkwork-server</url>
         </repository>
         <snapshotRepository>
             <id>github</id>
-            <name>GitHub Packages</name>
-            <url>https://maven.pkg.github.com/${github.owner}/${github.repo}</url>
+            <name>GitHub Packages - momotech/linkwork-server</name>
+            <url>https://maven.pkg.github.com/momotech/linkwork-server</url>
         </snapshotRepository>
     </distributionManagement>
 
