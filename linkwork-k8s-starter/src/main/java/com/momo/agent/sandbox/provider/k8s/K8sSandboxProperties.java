@@ -16,6 +16,10 @@ public class K8sSandboxProperties {
     private String defaultAgentImage;
     private String defaultRunnerImage;
     private String defaultImagePullPolicy = "IfNotPresent";
+    private boolean autoCreateImagePullSecret = true;
+    private String registry;
+    private String registryUsername;
+    private String registryPassword;
 
     public String getNamespace() {
         return namespace;
@@ -103,5 +107,37 @@ public class K8sSandboxProperties {
 
     public void setDefaultImagePullPolicy(String defaultImagePullPolicy) {
         this.defaultImagePullPolicy = defaultImagePullPolicy;
+    }
+
+    public boolean isAutoCreateImagePullSecret() {
+        return autoCreateImagePullSecret;
+    }
+
+    public void setAutoCreateImagePullSecret(boolean autoCreateImagePullSecret) {
+        this.autoCreateImagePullSecret = autoCreateImagePullSecret;
+    }
+
+    public String getRegistry() {
+        return registry;
+    }
+
+    public void setRegistry(String registry) {
+        this.registry = registry;
+    }
+
+    public String getRegistryUsername() {
+        return registryUsername;
+    }
+
+    public void setRegistryUsername(String registryUsername) {
+        this.registryUsername = registryUsername;
+    }
+
+    public String getRegistryPassword() {
+        return registryPassword;
+    }
+
+    public void setRegistryPassword(String registryPassword) {
+        this.registryPassword = registryPassword;
     }
 }

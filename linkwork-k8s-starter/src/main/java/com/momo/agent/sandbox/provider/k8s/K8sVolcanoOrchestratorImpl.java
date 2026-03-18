@@ -28,8 +28,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.util.StringUtils;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -75,6 +77,7 @@ public class K8sVolcanoOrchestratorImpl implements SandboxOrchestrator {
 
         try {
             cleanupExistingPods(spec.getSandboxId(), namespace);
+            createImagePullSecretIfNeeded(spec, namespace);
             createManagedResources(spec, namespace);
 
             if (properties.isCreatePodGroup()) {
@@ -587,6 +590,52 @@ public class K8sVolcanoOrchestratorImpl implements SandboxOrchestrator {
             .withLabel("service-id", sandboxId)
             .list()
             .getItems();
+    }
+
+    private void createImagePullSecretIfNeeded(SandboxSpec spec, String namespace) {
+        if (!properties.isAutoCreateImagePullSecret()) {
+            return;
+        }
+        if (!StringUtils.hasText(spec.getImagePullSecret())) {
+            return;
+        }
+        if (!StringUtils.hasText(properties.getRegistry())
+            || !StringUtils.hasText(properties.getRegistryUsername())
+            || !StringUtils.hasText(properties.getRegistryPassword())) {
+            return;
+        }
+
+        String secretName = spec.getImagePullSecret();
+        Secret existing = kubernetesClient.secrets().inNamespace(namespace).withName(secretName).get();
+        if (existing != null) {
+            return;
+        }
+
+        String registryHost = properties.getRegistry();
+        int slashIndex = registryHost.indexOf('/');
+        if (slashIndex > 0) {
+            registryHost = registryHost.substring(0, slashIndex);
+        }
+
+        String auth = Base64.getEncoder().encodeToString(
+            (properties.getRegistryUsername() + ":" + properties.getRegistryPassword()).getBytes(StandardCharsets.UTF_8)
+        );
+        String dockerConfigJson = String.format(
+            "{\"auths\":{\"%s\":{\"username\":\"%s\",\"password\":\"%s\",\"auth\":\"%s\"}}}",
+            registryHost, properties.getRegistryUsername(), properties.getRegistryPassword(), auth
+        );
+        Secret secret = new SecretBuilder()
+            .withNewMetadata()
+                .withName(secretName)
+                .withNamespace(namespace)
+                .addToLabels("app", "linkwork-sandbox")
+                .addToLabels("managed-by", "linkwork-k8s-starter")
+                .addToLabels("secret-kind", "image-pull")
+            .endMetadata()
+            .withType("kubernetes.io/dockerconfigjson")
+            .addToData(".dockerconfigjson", Base64.getEncoder().encodeToString(dockerConfigJson.getBytes(StandardCharsets.UTF_8)))
+            .build();
+        kubernetesClient.secrets().inNamespace(namespace).resource(secret).createOrReplace();
     }
 
     private void createManagedResources(SandboxSpec spec, String namespace) {
