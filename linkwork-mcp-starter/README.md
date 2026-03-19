@@ -27,7 +27,7 @@ linkwork:
 
 ## Usage
 
-Inject `com.momo.agent.mcp.core.McpClient` and call:
+Inject `com.linkwork.agent.mcp.core.McpClient` and call:
 
 - `discover(McpEndpoint endpoint)`
 - `probe(McpEndpoint endpoint)`
