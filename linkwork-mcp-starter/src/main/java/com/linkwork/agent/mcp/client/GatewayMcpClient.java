@@ -64,12 +64,24 @@ public class GatewayMcpClient implements McpClient {
         try {
             Map<String, Object> payload = endpointPayload(endpoint);
             Map<String, Object> response = post(baseUrl + "/proxy/probe", payload);
-            boolean success = readSuccess(response);
             int latencyMs = readLatency(response, (int) (System.currentTimeMillis() - start));
-            if (!success) {
+
+            Boolean success = readSuccessNullable(response);
+            if (success != null) {
+                if (!success) {
+                    return McpProbeResponse.failure(readMessage(response), latencyMs);
+                }
+                return McpProbeResponse.success(latencyMs);
+            }
+
+            String status = readStatus(response);
+            if ("online".equals(status) || "degraded".equals(status)) {
+                return McpProbeResponse.success(latencyMs);
+            }
+            if (StringUtils.hasText(status)) {
                 return McpProbeResponse.failure(readMessage(response), latencyMs);
             }
-            return McpProbeResponse.success(latencyMs);
+            return McpProbeResponse.failure("mcp gateway probe returned unknown response", latencyMs);
         } catch (Exception ex) {
             int latencyMs = (int) Math.max(1, System.currentTimeMillis() - start);
             return McpProbeResponse.failure(ex.getMessage(), latencyMs);
@@ -142,6 +154,28 @@ public class GatewayMcpClient implements McpClient {
     private boolean readSuccess(Map<String, Object> body) {
         Object success = body.get("success");
         return Boolean.TRUE.equals(success);
+    }
+
+    private Boolean readSuccessNullable(Map<String, Object> body) {
+        if (body == null || !body.containsKey("success")) {
+            return null;
+        }
+        Object success = body.get("success");
+        if (success instanceof Boolean bool) {
+            return bool;
+        }
+        if (success == null) {
+            return null;
+        }
+        return Boolean.parseBoolean(String.valueOf(success));
+    }
+
+    private String readStatus(Map<String, Object> body) {
+        Object status = body.get("status");
+        if (status == null) {
+            return null;
+        }
+        return String.valueOf(status).trim().toLowerCase();
     }
 
     private String readMessage(Map<String, Object> body) {
