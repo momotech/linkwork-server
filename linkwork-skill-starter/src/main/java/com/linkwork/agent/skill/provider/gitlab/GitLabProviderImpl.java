@@ -3,6 +3,7 @@ package com.linkwork.agent.skill.provider.gitlab;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.linkwork.agent.skill.core.SkillException;
 import com.linkwork.agent.skill.core.SkillProvider;
+import com.linkwork.agent.skill.core.SkillProviderExtendedOps;
 import com.linkwork.agent.skill.core.model.CommitInfo;
 import com.linkwork.agent.skill.core.model.FileNode;
 import com.linkwork.agent.skill.core.model.SkillInfo;
@@ -19,7 +20,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-public class GitLabProviderImpl implements SkillProvider {
+public class GitLabProviderImpl implements SkillProvider, SkillProviderExtendedOps {
     private static final String ROOT_SKILL = "root";
     private final RestClient restClient;
     private final GitLabProperties properties;
@@ -147,6 +148,74 @@ public class GitLabProviderImpl implements SkillProvider {
     @Override
     public List<CommitInfo> listCommits(String skillName, int page, int pageSize) {
         return listCommitsByPath(skillPath(skillName), page, pageSize);
+    }
+
+    // ==================== Extended Ops ====================
+
+    @Override
+    public String getHeadCommitId(String skillName) {
+        List<CommitInfo> commits = listCommitsByPath(skillPath(skillName), 1, 1);
+        return commits.isEmpty() ? null : commits.get(0).id();
+    }
+
+    @Override
+    public String getFileAtCommit(String skillName, String filePath, String commitSha) {
+        String fullPath = skillPath(skillName, filePath);
+        JsonNode node = restClient.get()
+                .uri(uriBuilder -> uriBuilder
+                        .path(fileEndpoint(fullPath))
+                        .queryParam("ref", commitSha)
+                        .build())
+                .retrieve()
+                .body(JsonNode.class);
+        String content = node.path("content").asText();
+        String encoding = node.path("encoding").asText();
+        if ("base64".equalsIgnoreCase(encoding)) {
+            byte[] decoded = Base64.getDecoder().decode(content.replace("\n", ""));
+            return new String(decoded, StandardCharsets.UTF_8);
+        }
+        return content;
+    }
+
+    @Override
+    public CommitInfo createSkillBranch(String skillName, String fromRef) {
+        String path = skillPath(skillName);
+        String readmePath = path + "/README.md";
+        Map<String, Object> body = new HashMap<>();
+        body.put("branch", properties.getBranch());
+        body.put("content", "# " + skillName + "\n");
+        body.put("commit_message", "init skill " + skillName);
+        body.put("encoding", "text");
+        JsonNode response = restClient.post()
+                .uri(fileEndpoint(readmePath))
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(body)
+                .retrieve()
+                .body(JsonNode.class);
+        return mapCommit(response.path("commit"));
+    }
+
+    @Override
+    public void deleteSkillBranch(String skillName) {
+        List<FileNode> files = getTree(skillName);
+        for (FileNode file : files) {
+            if (file.type() == FileNode.NodeType.FILE) {
+                String fullPath = skillPath(skillName, file.name());
+                String pathFromNode = file.path();
+                if (pathFromNode != null && !pathFromNode.isBlank()) {
+                    fullPath = pathFromNode;
+                }
+                Map<String, Object> body = new HashMap<>();
+                body.put("branch", properties.getBranch());
+                body.put("commit_message", "delete " + file.name());
+                restClient.method(org.springframework.http.HttpMethod.DELETE)
+                        .uri(fileEndpoint(fullPath))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body(body)
+                        .retrieve()
+                        .body(JsonNode.class);
+            }
+        }
     }
 
     private List<CommitInfo> listCommitsByPath(String path, int page, int pageSize) {

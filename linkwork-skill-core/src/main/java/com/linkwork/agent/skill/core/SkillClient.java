@@ -13,6 +13,7 @@ import java.util.function.Supplier;
 
 public class SkillClient {
     private final SkillProvider provider;
+    private final SkillProviderExtendedOps extendedOps;
     private final int maxRetries;
     private final Duration retryBackoff;
     private final Duration cacheTtl;
@@ -23,9 +24,14 @@ public class SkillClient {
                        Duration retryBackoff,
                        Duration cacheTtl) {
         this.provider = provider;
+        this.extendedOps = provider instanceof SkillProviderExtendedOps ops ? ops : null;
         this.maxRetries = Math.max(0, maxRetries);
         this.retryBackoff = retryBackoff == null ? Duration.ofMillis(200) : retryBackoff;
         this.cacheTtl = cacheTtl == null ? Duration.ofSeconds(10) : cacheTtl;
+    }
+
+    public boolean supportsExtendedOps() {
+        return extendedOps != null;
     }
 
     public List<SkillInfo> listSkills() {
@@ -69,6 +75,37 @@ public class SkillClient {
 
     public List<CommitInfo> listCommits(String skillName, int page, int pageSize) {
         return executeWithRetry(() -> provider.listCommits(skillName, page, pageSize));
+    }
+
+    // ==================== Extended Ops ====================
+
+    public String getHeadCommitId(String skillName) {
+        return executeWithRetry(() -> requireExtendedOps().getHeadCommitId(skillName));
+    }
+
+    public String getFileAtCommit(String skillName, String filePath, String commitSha) {
+        return executeWithRetry(() -> requireExtendedOps().getFileAtCommit(skillName, filePath, commitSha));
+    }
+
+    public CommitInfo createSkillBranch(String skillName, String fromRef) {
+        CommitInfo info = executeWithRetry(() -> requireExtendedOps().createSkillBranch(skillName, fromRef));
+        clearCache(skillName);
+        return info;
+    }
+
+    public void deleteSkillBranch(String skillName) {
+        executeWithRetry(() -> {
+            requireExtendedOps().deleteSkillBranch(skillName);
+            return null;
+        });
+        clearCache(skillName);
+    }
+
+    private SkillProviderExtendedOps requireExtendedOps() {
+        if (extendedOps == null) {
+            throw new SkillException("Current skill provider does not support extended operations");
+        }
+        return extendedOps;
     }
 
     public void clearCache(String skillName) {
