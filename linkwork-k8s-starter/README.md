@@ -6,7 +6,7 @@ Default provider: `k8s-volcano`.
 ## Configuration
 
 ```yaml
-momo:
+linkwork:
   agent:
     sandbox:
       provider: k8s-volcano
