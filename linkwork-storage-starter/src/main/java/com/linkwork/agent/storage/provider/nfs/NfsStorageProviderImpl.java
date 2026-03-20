@@ -9,13 +9,22 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
+import java.nio.file.attribute.PosixFilePermission;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Stream;
 
 public class NfsStorageProviderImpl implements StorageProvider, FileStorageOps {
+    /**
+     * Keep NFS files writable across backend(root) and runtime(agent) identities.
+     */
+    private static final Set<PosixFilePermission> DIR_PERMS = PosixFilePermissions.fromString("rwxrwxrwx");
+    private static final Set<PosixFilePermission> FILE_PERMS = PosixFilePermissions.fromString("rw-rw-rw-");
+
     private final NfsStorageProperties properties;
     private final Path baseRoot;
 
@@ -97,8 +106,9 @@ public class NfsStorageProviderImpl implements StorageProvider, FileStorageOps {
         }
         Path target = baseRoot.resolve(objectName);
         assertWithinBase(target.normalize());
-        ensureParentDirs(target.getParent());
+        ensureParentDirsWithPerms(target.getParent());
         Files.copy(input, target, StandardCopyOption.REPLACE_EXISTING);
+        setFilePerms(target);
         return objectName;
     }
 
@@ -110,9 +120,10 @@ public class NfsStorageProviderImpl implements StorageProvider, FileStorageOps {
         Path target = baseRoot.resolve(objectName);
         assertWithinBase(target.normalize());
         try {
-            ensureParentDirs(target.getParent());
+            ensureParentDirsWithPerms(target.getParent());
             Files.writeString(target, content, StandardCharsets.UTF_8,
                     StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+            setFilePerms(target);
         } catch (IOException e) {
             throw new StorageException("failed to upload text to " + objectName, e);
         }
@@ -143,8 +154,9 @@ public class NfsStorageProviderImpl implements StorageProvider, FileStorageOps {
         assertWithinBase(src.normalize());
         assertWithinBase(dest.normalize());
         try {
-            ensureParentDirs(dest.getParent());
+            ensureParentDirsWithPerms(dest.getParent());
             Files.copy(src, dest, StandardCopyOption.REPLACE_EXISTING);
+            setFilePerms(dest);
         } catch (IOException e) {
             throw new StorageException("failed to copy " + sourceObjectName + " -> " + destObjectName, e);
         }
@@ -205,10 +217,17 @@ public class NfsStorageProviderImpl implements StorageProvider, FileStorageOps {
         }
     }
 
-    private void ensureParentDirs(Path dir) throws IOException {
-        if (dir != null && !Files.isDirectory(dir)) {
-            Files.createDirectories(dir);
+    private void ensureParentDirsWithPerms(Path dir) throws IOException {
+        if (dir == null) {
+            return;
         }
+        if (Files.isDirectory(dir)) {
+            ensureDirPerms(dir);
+            return;
+        }
+        ensureParentDirsWithPerms(dir.getParent());
+        Files.createDirectory(dir);
+        setDirPerms(dir);
     }
 
     private String sanitizeWorkspaceId(String workspaceId) {
@@ -248,8 +267,42 @@ public class NfsStorageProviderImpl implements StorageProvider, FileStorageOps {
     private void initBaseRoot() {
         try {
             Files.createDirectories(baseRoot);
+            ensureDirPerms(baseRoot);
         } catch (IOException ex) {
             throw new StorageException("failed to init base-path: " + baseRoot, ex);
+        }
+    }
+
+    private void ensureDirPerms(Path dir) {
+        try {
+            Set<PosixFilePermission> current = Files.getPosixFilePermissions(dir);
+            if (!current.containsAll(DIR_PERMS)) {
+                setDirPerms(dir);
+            }
+        } catch (UnsupportedOperationException ignored) {
+            // Non-POSIX FS, ignore.
+        } catch (IOException ignored) {
+            // Best effort.
+        }
+    }
+
+    private void setDirPerms(Path dir) {
+        try {
+            Files.setPosixFilePermissions(dir, DIR_PERMS);
+        } catch (UnsupportedOperationException ignored) {
+            // Non-POSIX FS, ignore.
+        } catch (IOException ignored) {
+            // Best effort.
+        }
+    }
+
+    private void setFilePerms(Path file) {
+        try {
+            Files.setPosixFilePermissions(file, FILE_PERMS);
+        } catch (UnsupportedOperationException ignored) {
+            // Non-POSIX FS, ignore.
+        } catch (IOException ignored) {
+            // Best effort.
         }
     }
 }
