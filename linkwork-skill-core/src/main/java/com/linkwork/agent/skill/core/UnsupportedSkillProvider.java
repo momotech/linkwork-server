@@ -44,6 +44,6 @@ public class UnsupportedSkillProvider implements SkillProvider {
     }
 
     private SkillException unsupported() {
-        return new SkillException("agent.skill.provider='" + provider + "' is not supported yet");
+        return new SkillException("linkwork.agent.skill.provider='" + provider + "' is not supported yet");
     }
 }

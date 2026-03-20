@@ -25,6 +25,6 @@ public class UnsupportedStorageProvider implements StorageProvider {
     }
 
     private StorageException unsupported() {
-        return new StorageException("agent.storage.provider='" + provider + "' is not supported yet");
+        return new StorageException("linkwork.agent.storage.provider='" + provider + "' is not supported yet");
     }
 }
