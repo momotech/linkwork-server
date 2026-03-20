@@ -69,10 +69,14 @@ public class GitLabProperties {
     }
 
     public String effectiveToken() {
-        if (token != null && !token.isBlank()) {
+        // 与旧实现对齐：优先使用 deploy-token（对应 PRIVATE-TOKEN 直连方式）
+        if (isUsableToken(deployToken)) {
+            return deployToken;
+        }
+        if (isUsableToken(token)) {
             return token;
         }
-        return deployToken;
+        return null;
     }
 
     public String effectiveUrl() {
@@ -91,5 +95,29 @@ public class GitLabProperties {
         } catch (URISyntaxException ex) {
             return null;
         }
+    }
+
+    public boolean hasDeployToken() {
+        return isUsableToken(deployToken);
+    }
+
+    public boolean hasOauthToken() {
+        return isUsableToken(token);
+    }
+
+    public String deployTokenValue() {
+        return isUsableToken(deployToken) ? deployToken : null;
+    }
+
+    public String oauthTokenValue() {
+        return isUsableToken(token) ? token : null;
+    }
+
+    private boolean isUsableToken(String value) {
+        if (value == null || value.isBlank()) {
+            return false;
+        }
+        String normalized = value.trim().toLowerCase();
+        return !normalized.startsWith("dev-placeholder");
     }
 }
