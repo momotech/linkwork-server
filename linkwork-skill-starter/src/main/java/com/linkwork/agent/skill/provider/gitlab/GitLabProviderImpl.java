@@ -342,13 +342,13 @@ public class GitLabProviderImpl implements SkillProvider, SkillProviderExtendedO
 
     private void validate() {
         if (properties.effectiveUrl() == null || properties.effectiveUrl().isBlank()) {
-            throw new SkillException("agent.skill.gitlab.url or agent.skill.gitlab.repo-url is required");
+            throw new SkillException("linkwork.agent.skill.gitlab.url or linkwork.agent.skill.gitlab.repo-url is required");
         }
         if (properties.effectiveToken() == null || properties.effectiveToken().isBlank()) {
-            throw new SkillException("agent.skill.gitlab.token or agent.skill.gitlab.deploy-token is required");
+            throw new SkillException("linkwork.agent.skill.gitlab.token or linkwork.agent.skill.gitlab.deploy-token is required");
         }
         if (properties.getProjectId() == null || properties.getProjectId().isBlank()) {
-            throw new SkillException("agent.skill.gitlab.project-id is required");
+            throw new SkillException("linkwork.agent.skill.gitlab.project-id is required");
         }
     }
 }
