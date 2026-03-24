@@ -3,7 +3,7 @@ package com.linkwork.agent.storage;
 import com.linkwork.agent.storage.provider.nfs.NfsStorageProperties;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
-@ConfigurationProperties(prefix = "agent.storage")
+@ConfigurationProperties(prefix = "linkwork.agent.storage")
 public class AgentStorageProperties {
     private boolean enabled = true;
     private String provider = "nfs";

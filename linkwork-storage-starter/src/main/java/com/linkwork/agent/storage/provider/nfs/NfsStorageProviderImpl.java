@@ -240,7 +240,7 @@ public class NfsStorageProviderImpl implements StorageProvider, FileStorageOps {
 
     private Path resolveBaseRoot(String basePath) {
         if (basePath == null || basePath.isBlank()) {
-            throw new StorageException("agent.storage.nfs.base-path is required");
+            throw new StorageException("linkwork.agent.storage.nfs.base-path is required");
         }
         return Path.of(basePath).toAbsolutePath().normalize();
     }

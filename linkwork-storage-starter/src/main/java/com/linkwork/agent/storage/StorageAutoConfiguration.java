@@ -12,12 +12,12 @@ import org.springframework.context.annotation.Bean;
 
 @AutoConfiguration
 @EnableConfigurationProperties(AgentStorageProperties.class)
-@ConditionalOnProperty(prefix = "agent.storage", name = "enabled", havingValue = "true", matchIfMissing = true)
+@ConditionalOnProperty(prefix = "linkwork.agent.storage", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class StorageAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    @ConditionalOnProperty(prefix = "agent.storage", name = "provider", havingValue = "nfs", matchIfMissing = true)
+    @ConditionalOnProperty(prefix = "linkwork.agent.storage", name = "provider", havingValue = "nfs", matchIfMissing = true)
     public StorageProvider storageProvider(AgentStorageProperties properties) {
         return new NfsStorageProviderImpl(properties.getNfs());
     }
