@@ -3,7 +3,7 @@ package com.linkwork.agent.skill;
 import com.linkwork.agent.skill.provider.gitlab.GitLabProperties;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
-@ConfigurationProperties(prefix = "agent.skill")
+@ConfigurationProperties(prefix = "linkwork.agent.skill")
 public class AgentSkillProperties {
     private boolean enabled = true;
     private String provider = "gitlab";

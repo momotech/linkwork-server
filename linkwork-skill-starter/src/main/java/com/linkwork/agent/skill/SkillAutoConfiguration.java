@@ -16,12 +16,12 @@ import java.time.Duration;
 
 @AutoConfiguration
 @EnableConfigurationProperties(AgentSkillProperties.class)
-@ConditionalOnProperty(prefix = "agent.skill", name = "enabled", havingValue = "true", matchIfMissing = true)
+@ConditionalOnProperty(prefix = "linkwork.agent.skill", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class SkillAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean(name = "skillGitLabRestClient")
-    @ConditionalOnProperty(prefix = "agent.skill", name = "provider", havingValue = "gitlab", matchIfMissing = true)
+    @ConditionalOnProperty(prefix = "linkwork.agent.skill", name = "provider", havingValue = "gitlab", matchIfMissing = true)
     public RestClient skillGitLabRestClient(AgentSkillProperties properties,
                                             ObjectProvider<RestClient.Builder> builderProvider) {
         String baseUrl = properties.getGitlab().effectiveUrl();
@@ -36,7 +36,7 @@ public class SkillAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    @ConditionalOnProperty(prefix = "agent.skill", name = "provider", havingValue = "gitlab", matchIfMissing = true)
+    @ConditionalOnProperty(prefix = "linkwork.agent.skill", name = "provider", havingValue = "gitlab", matchIfMissing = true)
     public SkillProvider skillProvider(RestClient skillGitLabRestClient,
                                        AgentSkillProperties properties) {
         return new GitLabProviderImpl(skillGitLabRestClient, properties.getGitlab());
