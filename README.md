@@ -1,42 +1,44 @@
 # linkwork-server
 
-`linkwork-server` 是 LinkWork 的 Java 能力层仓库，提供可复用的 **core contract + Spring Boot starter**，供上层业务服务（如 `LinkWork/back`）集成。
+English | [中文](./README_zh-CN.md)
 
-## 模块结构
+`linkwork-server` is the Java capability-layer repository for LinkWork. It provides reusable core contracts and Spring Boot starters consumed by upper-layer services (for example `LinkWork/back`).
 
-| 模块 | 作用 |
+## Module Layout
+
+| Module | Purpose |
 |---|---|
-| `linkwork-bom` | 统一依赖版本管理（BOM） |
-| `linkwork-skill-core` / `linkwork-skill-starter` | Skills 能力抽象与默认实现 |
-| `linkwork-storage-core` / `linkwork-storage-starter` | 存储能力抽象与默认实现 |
-| `linkwork-sandbox-core` / `linkwork-k8s-starter` | 沙箱编排抽象与 K8s/Volcano 实现 |
-| `linkwork-mcp-core` / `linkwork-mcp-starter` | MCP 协议抽象与 Spring 集成 |
+| `linkwork-bom` | Dependency version management (BOM) |
+| `linkwork-skill-core` / `linkwork-skill-starter` | Skills abstraction and default provider wiring |
+| `linkwork-storage-core` / `linkwork-storage-starter` | Storage abstraction and default provider wiring |
+| `linkwork-sandbox-core` / `linkwork-k8s-starter` | Sandbox abstraction and K8s/Volcano implementation |
+| `linkwork-mcp-core` / `linkwork-mcp-starter` | MCP abstraction and Spring integration |
 
-## 本地开发
+## Local Development
 
-### 1) 环境要求
+### 1) Requirements
 
 - JDK 21
 - Maven 3.9+
 
-### 2) 构建
+### 2) Build
 
 ```bash
 cd linkwork-server
 mvn -DskipTests install
 ```
 
-### 3) 在业务服务中使用
+### 3) Consumption by application service
 
-`LinkWork/back/pom.xml` 通过依赖 `io.linkwork:*` 的 starter 复用本仓库能力，版本由 `linkwork.server.version` 控制。
+`LinkWork/back/pom.xml` consumes `io.linkwork:*` artifacts, with version controlled by `linkwork.server.version`.
 
-## Deploy 流程
+## Deploy Flow
 
-`linkwork-server` 本身是 **库仓库**，不是独立 Web 服务；部署流程是发布 Maven 包给上游服务使用。
+`linkwork-server` is a library repository, not a standalone runtime service. Deployment means publishing Maven artifacts for downstream services.
 
-### 1) 发布到 GitHub Packages
+### 1) Publish to GitHub Packages
 
-仓库内已提供脚本：`scripts/deploy-github-packages.sh`
+Built-in script: `scripts/deploy-github-packages.sh`
 
 ```bash
 cd linkwork-server
@@ -44,18 +46,18 @@ export GITHUB_TOKEN=<your_token>
 ./scripts/deploy-github-packages.sh
 ```
 
-可选变量：
+Optional variables:
 
-- `GITHUB_OWNER`（默认 `momotech`）
-- `GITHUB_REPO`（默认 `linkwork-server`）
-- `SETTINGS_FILE`（默认 `settings-github.xml.example`）
+- `GITHUB_OWNER` (default: `momotech`)
+- `GITHUB_REPO` (default: `linkwork-server`)
+- `SETTINGS_FILE` (default: `settings-github.xml.example`)
 
-### 2) 上游服务消费新版本
+### 2) Upgrade downstream services
 
-- 在上游项目更新 `linkwork.server.version`
-- 重新执行 Maven 构建并发布上游服务镜像
+- Update `linkwork.server.version` in consumer services
+- Rebuild and redeploy consumer service images
 
-## 相关文档
+## References
 
-- `linkwork-*/README.md`（各子模块能力与配置）
-- 根仓库 `LinkWork/docs/architecture/components_zh-CN.md`
+- `linkwork-*/README.md` for module-level details
+- `LinkWork/docs/architecture/components.md`
