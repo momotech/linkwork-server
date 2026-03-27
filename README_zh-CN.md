@@ -1,6 +1,6 @@
 # linkwork-server
 
-`linkwork-server` 是 LinkWork 的 Java 能力层仓库，提供可复用的 **core contract + Spring Boot starter**，供上层业务服务（如 `LinkWork/back`）集成。
+`linkwork-server` 是 LinkWork 的 Java 能力层仓库，提供可复用的 **core contract + Spring Boot starter**，供上层业务服务（如 `LinkWork/backend`）集成。
 
 ## 模块结构
 
@@ -28,7 +28,7 @@ mvn -DskipTests install
 
 ### 3) 在业务服务中使用
 
-`LinkWork/back/pom.xml` 通过依赖 `io.linkwork:*` 的 starter 复用本仓库能力，版本由 `linkwork.server.version` 控制。
+`LinkWork/backend/pom.xml` 通过依赖 `io.linkwork:*` 的 starter 复用本仓库能力，版本由 `linkwork.server.version` 控制。
 
 ## Deploy 流程
 
