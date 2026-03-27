@@ -2,7 +2,7 @@
 
 English | [中文](./README_zh-CN.md)
 
-`linkwork-server` is the Java capability-layer repository for LinkWork. It provides reusable core contracts and Spring Boot starters consumed by upper-layer services (for example `LinkWork/back`).
+`linkwork-server` is the Java capability-layer repository for LinkWork. It provides reusable core contracts and Spring Boot starters consumed by upper-layer services (for example `LinkWork/backend`).
 
 ## Module Layout
 
@@ -30,7 +30,7 @@ mvn -DskipTests install
 
 ### 3) Consumption by application service
 
-`LinkWork/back/pom.xml` consumes `io.linkwork:*` artifacts, with version controlled by `linkwork.server.version`.
+`LinkWork/backend/pom.xml` consumes `io.linkwork:*` artifacts, with version controlled by `linkwork.server.version`.
 
 ## Deploy Flow
 
