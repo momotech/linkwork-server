@@ -18,6 +18,9 @@ agent:
       token: ${LINKWORK_GITLAB_TOKEN:}
       deploy-token: ${LINKWORK_GITLAB_DEPLOY_TOKEN:}
       project-id: 10086
+      # tree(default): one branch + root-path directories as skills
+      # branch-per-skill: each git branch is one skill
+      mode: tree
       branch: main
       root-path: skills
 ```
@@ -25,6 +28,8 @@ agent:
 Notes:
 - `token` and `deploy-token` are interchangeable; starter uses the first non-blank value.
 - `url` can be omitted if `repo-url` is provided.
+- `mode=tree` keeps legacy directory model (`root-path/<skillName>/...`).
+- `mode=branch-per-skill` uses branch model (`skillName` == git branch).
 
 ## Usage
 

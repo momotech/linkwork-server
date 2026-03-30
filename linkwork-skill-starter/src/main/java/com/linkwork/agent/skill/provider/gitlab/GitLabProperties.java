@@ -11,6 +11,12 @@ public class GitLabProperties {
     private String projectId;
     private String branch = "main";
     private String rootPath = "skills";
+    /**
+     * skill model:
+     * - tree (default): one branch + rootPath directories as skills
+     * - branch-per-skill: each git branch is one skill
+     */
+    private String mode = "tree";
 
     public String getUrl() {
         return url;
@@ -66,6 +72,24 @@ public class GitLabProperties {
 
     public void setRootPath(String rootPath) {
         this.rootPath = rootPath;
+    }
+
+    public String getMode() {
+        return mode;
+    }
+
+    public void setMode(String mode) {
+        this.mode = mode;
+    }
+
+    public boolean isBranchPerSkillMode() {
+        if (mode == null) {
+            return false;
+        }
+        String normalized = mode.trim().toLowerCase();
+        return "branch-per-skill".equals(normalized)
+            || "branch_per_skill".equals(normalized)
+            || "branch".equals(normalized);
     }
 
     public String effectiveToken() {
