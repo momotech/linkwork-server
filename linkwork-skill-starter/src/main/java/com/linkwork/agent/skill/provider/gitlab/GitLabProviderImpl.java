@@ -13,6 +13,7 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.util.UriUtils;
 
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -87,14 +88,14 @@ public class GitLabProviderImpl implements SkillProvider, SkillProviderExtendedO
         JsonNode response;
         if (exists) {
             response = restClient.put()
-                .uri(fileEndpointPath(fullPath))
+                .uri(fileEndpointUri(fullPath))
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(body)
                 .retrieve()
                 .body(JsonNode.class);
         } else {
             response = restClient.post()
-                .uri(fileEndpointPath(fullPath))
+                .uri(fileEndpointUri(fullPath))
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(body)
                 .retrieve()
@@ -113,7 +114,7 @@ public class GitLabProviderImpl implements SkillProvider, SkillProviderExtendedO
         body.put("commit_message", commitMessage);
 
         JsonNode response = restClient.method(HttpMethod.DELETE)
-            .uri(fileEndpointPath(fullPath))
+            .uri(fileEndpointUri(fullPath))
             .contentType(MediaType.APPLICATION_JSON)
             .body(body)
             .retrieve()
@@ -146,7 +147,7 @@ public class GitLabProviderImpl implements SkillProvider, SkillProviderExtendedO
     public String getFileAtCommit(String skillName, String filePath, String commitSha) {
         String fullPath = resolveFilePath(skillName, filePath);
         JsonNode node = restClient.get()
-            .uri(fileEndpointWithRef(fullPath, commitSha))
+            .uri(fileEndpointUriWithRef(fullPath, commitSha))
             .retrieve()
             .body(JsonNode.class);
         return decodeContent(node);
@@ -176,7 +177,7 @@ public class GitLabProviderImpl implements SkillProvider, SkillProviderExtendedO
         body.put("commit_message", "init skill " + skillName);
         body.put("encoding", "text");
         JsonNode response = restClient.post()
-            .uri(fileEndpointPath(readmePath))
+            .uri(fileEndpointUri(readmePath))
             .contentType(MediaType.APPLICATION_JSON)
             .body(body)
             .retrieve()
@@ -206,7 +207,7 @@ public class GitLabProviderImpl implements SkillProvider, SkillProviderExtendedO
                 body.put("branch", properties.getBranch());
                 body.put("commit_message", "delete " + file.name());
                 restClient.method(HttpMethod.DELETE)
-                    .uri(fileEndpointPath(fullPath))
+                    .uri(fileEndpointUri(fullPath))
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(body)
                     .retrieve()
@@ -347,7 +348,7 @@ public class GitLabProviderImpl implements SkillProvider, SkillProviderExtendedO
 
     private JsonNode getFileMeta(String fullPath, String ref) {
         return restClient.get()
-            .uri(fileEndpointWithRef(fullPath, ref))
+            .uri(fileEndpointUriWithRef(fullPath, ref))
             .retrieve()
             .body(JsonNode.class);
     }
@@ -457,6 +458,27 @@ public class GitLabProviderImpl implements SkillProvider, SkillProviderExtendedO
     private String fileEndpointWithRef(String fullPath, String ref) {
         String encodedRef = UriUtils.encodeQueryParam(ref, StandardCharsets.UTF_8);
         return fileEndpointPath(fullPath) + "?ref=" + encodedRef;
+    }
+
+    /**
+     * Use absolute URI to bypass RestClient UriTemplate re-encoding.
+     * Otherwise pre-encoded file_path (e.g. design%2Fdesign.md) may become design%252Fdesign.md.
+     */
+    private URI fileEndpointUri(String fullPath) {
+        return absoluteUri(fileEndpointPath(fullPath));
+    }
+
+    private URI fileEndpointUriWithRef(String fullPath, String ref) {
+        return absoluteUri(fileEndpointWithRef(fullPath, ref));
+    }
+
+    private URI absoluteUri(String pathAndQuery) {
+        String base = properties.effectiveUrl();
+        if (base == null || base.isBlank()) {
+            throw new SkillException("agent.skill.gitlab.url or agent.skill.gitlab.repo-url is required");
+        }
+        String normalizedBase = base.endsWith("/") ? base.substring(0, base.length() - 1) : base;
+        return URI.create(normalizedBase + pathAndQuery);
     }
 
     private String projectEndpoint(String suffix) {
