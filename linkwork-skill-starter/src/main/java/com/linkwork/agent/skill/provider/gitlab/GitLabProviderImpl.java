@@ -87,14 +87,14 @@ public class GitLabProviderImpl implements SkillProvider, SkillProviderExtendedO
         JsonNode response;
         if (exists) {
             response = restClient.put()
-                .uri(fileEndpoint(fullPath))
+                .uri(fileEndpointPath(fullPath))
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(body)
                 .retrieve()
                 .body(JsonNode.class);
         } else {
             response = restClient.post()
-                .uri(fileEndpoint(fullPath))
+                .uri(fileEndpointPath(fullPath))
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(body)
                 .retrieve()
@@ -113,7 +113,7 @@ public class GitLabProviderImpl implements SkillProvider, SkillProviderExtendedO
         body.put("commit_message", commitMessage);
 
         JsonNode response = restClient.method(HttpMethod.DELETE)
-            .uri(fileEndpoint(fullPath))
+            .uri(fileEndpointPath(fullPath))
             .contentType(MediaType.APPLICATION_JSON)
             .body(body)
             .retrieve()
@@ -146,10 +146,7 @@ public class GitLabProviderImpl implements SkillProvider, SkillProviderExtendedO
     public String getFileAtCommit(String skillName, String filePath, String commitSha) {
         String fullPath = resolveFilePath(skillName, filePath);
         JsonNode node = restClient.get()
-            .uri(uriBuilder -> uriBuilder
-                .path(fileEndpoint(fullPath))
-                .queryParam("ref", commitSha)
-                .build())
+            .uri(fileEndpointWithRef(fullPath, commitSha))
             .retrieve()
             .body(JsonNode.class);
         return decodeContent(node);
@@ -179,7 +176,7 @@ public class GitLabProviderImpl implements SkillProvider, SkillProviderExtendedO
         body.put("commit_message", "init skill " + skillName);
         body.put("encoding", "text");
         JsonNode response = restClient.post()
-            .uri(fileEndpoint(readmePath))
+            .uri(fileEndpointPath(readmePath))
             .contentType(MediaType.APPLICATION_JSON)
             .body(body)
             .retrieve()
@@ -209,7 +206,7 @@ public class GitLabProviderImpl implements SkillProvider, SkillProviderExtendedO
                 body.put("branch", properties.getBranch());
                 body.put("commit_message", "delete " + file.name());
                 restClient.method(HttpMethod.DELETE)
-                    .uri(fileEndpoint(fullPath))
+                    .uri(fileEndpointPath(fullPath))
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(body)
                     .retrieve()
@@ -350,10 +347,7 @@ public class GitLabProviderImpl implements SkillProvider, SkillProviderExtendedO
 
     private JsonNode getFileMeta(String fullPath, String ref) {
         return restClient.get()
-            .uri(uriBuilder -> uriBuilder
-                .path(fileEndpoint(fullPath))
-                .queryParam("ref", ref)
-                .build())
+            .uri(fileEndpointWithRef(fullPath, ref))
             .retrieve()
             .body(JsonNode.class);
     }
@@ -448,9 +442,21 @@ public class GitLabProviderImpl implements SkillProvider, SkillProviderExtendedO
         return properties.isBranchPerSkillMode();
     }
 
-    private String fileEndpoint(String fullPath) {
+    /**
+     * Build GitLab file endpoint path.
+     *
+     * NOTE:
+     * We return an already encoded string path (e.g. scripts%2Fmake.sh) and pass it via
+     * RestClient#uri(String) to avoid UriBuilder double-encoding (%2F -> %252F).
+     */
+    private String fileEndpointPath(String fullPath) {
         String encoded = encodePathSegment(fullPath);
         return projectEndpoint("/repository/files/" + encoded);
+    }
+
+    private String fileEndpointWithRef(String fullPath, String ref) {
+        String encodedRef = UriUtils.encodeQueryParam(ref, StandardCharsets.UTF_8);
+        return fileEndpointPath(fullPath) + "?ref=" + encodedRef;
     }
 
     private String projectEndpoint(String suffix) {
