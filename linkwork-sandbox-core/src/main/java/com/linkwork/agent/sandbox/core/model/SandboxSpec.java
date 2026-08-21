@@ -12,6 +12,9 @@ import java.util.Map;
 public class SandboxSpec {
 
     private String sandboxId;
+    private String lifecycleGeneration;
+    private Long fenceToken;
+    private String expectedPodGroupUid;
     private SandboxMode mode = SandboxMode.SIDECAR;
     private Integer podCount = 1;
     private String namespace;
@@ -42,6 +45,30 @@ public class SandboxSpec {
 
     public void setSandboxId(String sandboxId) {
         this.sandboxId = sandboxId;
+    }
+
+    public String getLifecycleGeneration() {
+        return lifecycleGeneration;
+    }
+
+    public void setLifecycleGeneration(String lifecycleGeneration) {
+        this.lifecycleGeneration = lifecycleGeneration;
+    }
+
+    public Long getFenceToken() {
+        return fenceToken;
+    }
+
+    public void setFenceToken(Long fenceToken) {
+        this.fenceToken = fenceToken;
+    }
+
+    public String getExpectedPodGroupUid() {
+        return expectedPodGroupUid;
+    }
+
+    public void setExpectedPodGroupUid(String expectedPodGroupUid) {
+        this.expectedPodGroupUid = expectedPodGroupUid;
     }
 
     public SandboxMode getMode() {
