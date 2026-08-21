@@ -32,12 +32,18 @@ public class LifecycleMetadataGeneratorTest {
     @SuppressWarnings("unchecked")
     public void podGroupGeneratorEmitsTheSameLifecycleIdentity() {
         SandboxSpec spec = lifecycleSpec();
+        spec.setLabels(Map.of(
+            "service-id", "231",
+            SandboxLifecycleMetadata.GENERATION, "stale-generation",
+            SandboxLifecycleMetadata.FENCE_TOKEN, "1"
+        ));
 
         Map<String, Object> podGroup = new PodGroupSpecGenerator().generate(spec, "robot", "default", null);
         Map<String, Object> metadata = (Map<String, Object>) podGroup.get("metadata");
         Map<String, String> labels = (Map<String, String>) metadata.get("labels");
 
         assertLifecycleLabels(labels);
+        assertEquals("231", labels.get("service-id"));
         assertEquals(1, ((Map<String, Object>) podGroup.get("spec")).get("minMember"));
     }
 
