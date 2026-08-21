@@ -12,6 +12,7 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.util.UriUtils;
 
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -36,12 +37,9 @@ public class GitLabProviderImpl implements SkillProvider, SkillProviderExtendedO
 
     @Override
     public List<SkillInfo> listSkills() {
-        // 优先与 general_agent 对齐：分支即 Skill（排除 main/master）。
-        List<SkillInfo> byBranches = listSkillsFromBranches();
-        if (!byBranches.isEmpty()) {
-            return byBranches;
+        if (properties.isBranchPerSkillMode()) {
+            return listSkillsFromBranches();
         }
-        // 兼容回退：目录即 Skill（旧 starter 目录模式）。
         return listSkillsFromDirectories();
     }
 
@@ -95,14 +93,14 @@ public class GitLabProviderImpl implements SkillProvider, SkillProviderExtendedO
         JsonNode response;
         if (exists) {
             response = restClient.put()
-                    .uri(fileEndpoint(fullPath))
+                    .uri(fileEndpointUri(fullPath))
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(body)
                     .retrieve()
                     .body(JsonNode.class);
         } else {
             response = restClient.post()
-                    .uri(fileEndpoint(fullPath))
+                    .uri(fileEndpointUri(fullPath))
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(body)
                     .retrieve()
@@ -120,7 +118,7 @@ public class GitLabProviderImpl implements SkillProvider, SkillProviderExtendedO
         body.put("commit_message", commitMessage);
 
         JsonNode response = restClient.method(org.springframework.http.HttpMethod.DELETE)
-                .uri(fileEndpoint(fullPath))
+                .uri(fileEndpointUri(fullPath))
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(body)
                 .retrieve()
@@ -152,10 +150,7 @@ public class GitLabProviderImpl implements SkillProvider, SkillProviderExtendedO
     public String getFileAtCommit(String skillName, String filePath, String commitSha) {
         String fullPath = resolveSkillFilePath(skillName, filePath);
         JsonNode node = restClient.get()
-                .uri(uriBuilder -> uriBuilder
-                        .path(fileEndpoint(fullPath))
-                        .queryParam("ref", commitSha)
-                        .build())
+                .uri(fileEndpointUriWithRef(fullPath, commitSha))
                 .retrieve()
                 .body(JsonNode.class);
         String content = node.path("content").asText();
@@ -229,7 +224,7 @@ public class GitLabProviderImpl implements SkillProvider, SkillProviderExtendedO
                     body.put("branch", resolveDefaultBranch(properties.getBranch()));
                     body.put("commit_message", "delete " + file.name());
                     restClient.method(org.springframework.http.HttpMethod.DELETE)
-                            .uri(fileEndpoint(fullPath))
+                            .uri(fileEndpointUri(fullPath))
                             .contentType(MediaType.APPLICATION_JSON)
                             .body(body)
                             .retrieve()
@@ -384,10 +379,7 @@ public class GitLabProviderImpl implements SkillProvider, SkillProviderExtendedO
 
     private JsonNode getFileMeta(String fullPath, String ref) {
         return restClient.get()
-                .uri(uriBuilder -> uriBuilder
-                        .path(fileEndpoint(fullPath))
-                        .queryParam("ref", ref)
-                        .build())
+                .uri(fileEndpointUriWithRef(fullPath, ref))
                 .retrieve()
                 .body(JsonNode.class);
     }
@@ -415,7 +407,7 @@ public class GitLabProviderImpl implements SkillProvider, SkillProviderExtendedO
     }
 
     private boolean isBranchSkill(String skillName) {
-        if (skillName == null || skillName.isBlank()) {
+        if (!properties.isBranchPerSkillMode() || skillName == null || skillName.isBlank()) {
             return false;
         }
         return branchSkillCache.computeIfAbsent(skillName.trim(), this::branchExists);
@@ -474,6 +466,28 @@ public class GitLabProviderImpl implements SkillProvider, SkillProviderExtendedO
     private String fileEndpoint(String fullPath) {
         String encoded = UriUtils.encodePathSegment(fullPath, StandardCharsets.UTF_8);
         return projectEndpoint("/repository/files/" + encoded);
+    }
+
+    /**
+     * Use an absolute URI so RestClient does not encode the already escaped GitLab file path again
+     * (for example, {@code design%2Fdesign.md} must not become {@code design%252Fdesign.md}).
+     */
+    URI fileEndpointUri(String fullPath) {
+        return absoluteUri(fileEndpoint(fullPath));
+    }
+
+    URI fileEndpointUriWithRef(String fullPath, String ref) {
+        String encodedRef = UriUtils.encodeQueryParam(ref, StandardCharsets.UTF_8);
+        return absoluteUri(fileEndpoint(fullPath) + "?ref=" + encodedRef);
+    }
+
+    private URI absoluteUri(String pathAndQuery) {
+        String base = properties.effectiveUrl();
+        if (base == null || base.isBlank()) {
+            throw new SkillException("linkwork.agent.skill.gitlab.url or linkwork.agent.skill.gitlab.repo-url is required");
+        }
+        String normalizedBase = base.endsWith("/") ? base.substring(0, base.length() - 1) : base;
+        return URI.create(normalizedBase + pathAndQuery);
     }
 
     private String branchEndpoint(String branchName) {

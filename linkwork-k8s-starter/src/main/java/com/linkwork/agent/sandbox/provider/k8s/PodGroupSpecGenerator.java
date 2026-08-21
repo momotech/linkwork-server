@@ -30,6 +30,7 @@ public class PodGroupSpecGenerator {
         labels.put("app", "linkwork-sandbox");
         labels.put("sandbox-id", spec.getSandboxId());
         labels.put("service-id", spec.getSandboxId());
+        labels.putAll(spec.getLabels());
         if (StringUtils.hasText(spec.getLifecycleGeneration()) && spec.getFenceToken() != null) {
             labels.put(SandboxLifecycleMetadata.MANAGED, "true");
             labels.put(SandboxLifecycleMetadata.SERVICE_ID, spec.getSandboxId());

@@ -10,6 +10,9 @@ public class SandboxStatus {
     private String namespace;
     private String podGroupPhase;
     private String podGroupUid;
+    private Instant podGroupCreatedAt;
+    private Instant podGroupDeletionTimestamp;
+    private boolean lifecycleManaged;
     private String lifecycleGeneration;
     private Long fenceToken;
     private Integer totalPods = 0;
@@ -53,6 +56,30 @@ public class SandboxStatus {
 
     public void setPodGroupUid(String podGroupUid) {
         this.podGroupUid = podGroupUid;
+    }
+
+    public Instant getPodGroupCreatedAt() {
+        return podGroupCreatedAt;
+    }
+
+    public void setPodGroupCreatedAt(Instant podGroupCreatedAt) {
+        this.podGroupCreatedAt = podGroupCreatedAt;
+    }
+
+    public Instant getPodGroupDeletionTimestamp() {
+        return podGroupDeletionTimestamp;
+    }
+
+    public void setPodGroupDeletionTimestamp(Instant podGroupDeletionTimestamp) {
+        this.podGroupDeletionTimestamp = podGroupDeletionTimestamp;
+    }
+
+    public boolean isLifecycleManaged() {
+        return lifecycleManaged;
+    }
+
+    public void setLifecycleManaged(boolean lifecycleManaged) {
+        this.lifecycleManaged = lifecycleManaged;
     }
 
     public String getLifecycleGeneration() {

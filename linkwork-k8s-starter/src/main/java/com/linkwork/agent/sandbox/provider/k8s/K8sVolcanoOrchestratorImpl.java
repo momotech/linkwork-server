@@ -14,6 +14,7 @@ import com.linkwork.agent.sandbox.core.model.SandboxScaleResult;
 import com.linkwork.agent.sandbox.core.model.SandboxSpec;
 import com.linkwork.agent.sandbox.core.model.SandboxStatus;
 import io.fabric8.kubernetes.api.model.Container;
+import io.fabric8.kubernetes.api.model.ContainerStatus;
 import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.api.model.ConfigMapBuilder;
 import io.fabric8.kubernetes.api.model.DeleteOptions;
@@ -42,6 +43,7 @@ import org.springframework.util.StringUtils;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collections;
@@ -105,6 +107,7 @@ public class K8sVolcanoOrchestratorImpl implements SandboxOrchestrator {
             podGroup = waitForPodGroupReady(
                 namespace,
                 podGroupName,
+                spec.getSandboxId(),
                 spec.getLifecycleGeneration(),
                 spec.getFenceToken(),
                 properties.getWaitPodGroupReadySeconds()
@@ -215,12 +218,25 @@ public class K8sVolcanoOrchestratorImpl implements SandboxOrchestrator {
             if (preconditionError != null) {
                 return SandboxResult.failed(sandboxId, "LIFECYCLE_PRECONDITION_FAILED", preconditionError);
             }
-            pods = filterOwnedResources(listPodsBySandboxId(resolvedNamespace, sandboxId), request);
-            configMaps = filterOwnedResources(listManagedConfigMaps(sandboxId, resolvedNamespace), request);
-            secrets = filterOwnedResources(listManagedSecrets(sandboxId, resolvedNamespace), request);
-            if (!request.isAllowLegacy() && hasConflictingManagedPods(resolvedNamespace, request, pods)) {
+            List<Pod> candidatePods = listPodsBySandboxId(resolvedNamespace, sandboxId);
+            List<ConfigMap> candidateConfigMaps = listManagedConfigMaps(sandboxId, resolvedNamespace);
+            List<Secret> candidateSecrets = listManagedSecrets(sandboxId, resolvedNamespace);
+            if (request.isAllowLegacy()
+                && (containsLifecycleManagedResource(candidatePods)
+                    || containsLifecycleManagedResource(candidateConfigMaps)
+                    || containsLifecycleManagedResource(candidateSecrets))) {
                 return SandboxResult.failed(sandboxId, "LIFECYCLE_PRECONDITION_FAILED",
-                    "managed pods belong to a different lifecycle generation");
+                    "legacy destroy refuses lifecycle-managed sandbox resources");
+            }
+            pods = filterOwnedResources(candidatePods, request);
+            configMaps = filterOwnedResources(candidateConfigMaps, request);
+            secrets = filterOwnedResources(candidateSecrets, request);
+            if (!request.isAllowLegacy()
+                && (hasConflictingManagedResources(candidatePods, pods)
+                    || hasConflictingManagedResources(candidateConfigMaps, configMaps)
+                    || hasConflictingManagedResources(candidateSecrets, secrets))) {
+                return SandboxResult.failed(sandboxId, "LIFECYCLE_PRECONDITION_FAILED",
+                    "managed sandbox resources belong to a different lifecycle generation");
             }
         } catch (Exception ex) {
             log.error("Failed to inventory sandbox {} before destroy: {}", sandboxId, ex.getMessage(), ex);
@@ -321,13 +337,24 @@ public class K8sVolcanoOrchestratorImpl implements SandboxOrchestrator {
             }
             List<SandboxPodStatus> pods = new ArrayList<>();
             int readyCount = 0;
+            boolean lifecycleManaged = false;
 
             for (Pod pod : podList) {
                 SandboxPodStatus podStatus = new SandboxPodStatus();
-                podStatus.setPodName(pod.getMetadata().getName());
+                ObjectMeta metadata = pod.getMetadata();
+                Map<String, String> podLabels = labelsOf(metadata);
+                lifecycleManaged = lifecycleManaged || isLifecycleManagedResource(metadata);
+                podStatus.setPodName(metadata.getName());
                 podStatus.setPhase(pod.getStatus() == null ? null : pod.getStatus().getPhase());
                 podStatus.setNodeName(pod.getSpec() == null ? null : pod.getSpec().getNodeName());
                 podStatus.setReady(isReadyPod(pod));
+                podStatus.setTerminating(StringUtils.hasText(metadata.getDeletionTimestamp()));
+                podStatus.setCreatedAt(parseKubernetesInstant(metadata.getCreationTimestamp()));
+                podStatus.setTerminalAt(resolveTerminalAt(pod));
+                podStatus.setLifecycleGeneration(
+                    podLabels.get(SandboxLifecycleMetadata.GENERATION));
+                podStatus.setFenceToken(parseLong(
+                    podLabels.get(SandboxLifecycleMetadata.FENCE_TOKEN)));
                 if (podStatus.isReady()) {
                     readyCount++;
                 }
@@ -341,13 +368,19 @@ public class K8sVolcanoOrchestratorImpl implements SandboxOrchestrator {
             GenericKubernetesResource podGroup = getPodGroup(status.getNamespace(), sandboxId);
             if (podGroup != null && podGroup.getMetadata() != null) {
                 Map<String, String> labels = labelsOf(podGroup.getMetadata());
+                lifecycleManaged = lifecycleManaged || isLifecycleManagedResource(podGroup.getMetadata());
                 status.setPodGroupUid(podGroup.getMetadata().getUid());
+                status.setPodGroupCreatedAt(
+                    parseKubernetesInstant(podGroup.getMetadata().getCreationTimestamp()));
+                status.setPodGroupDeletionTimestamp(
+                    parseKubernetesInstant(podGroup.getMetadata().getDeletionTimestamp()));
                 status.setLifecycleGeneration(labels.get(SandboxLifecycleMetadata.GENERATION));
                 status.setFenceToken(parseLong(labels.get(SandboxLifecycleMetadata.FENCE_TOKEN)));
                 if (!matchesExpectedLifecycle(podGroup.getMetadata(), query)) {
                     status.setMessage("PodGroup lifecycle precondition mismatch");
                 }
             }
+            status.setLifecycleManaged(lifecycleManaged);
             Map<String, Integer> podGroupCounters = queryPodGroupCounters(sandboxId, status.getNamespace());
             status.setPodGroupPhase(queryPodGroupPhase(sandboxId, status.getNamespace()));
             status.setPodGroupMinMember(podGroupCounters.get("minMember"));
@@ -364,6 +397,47 @@ public class K8sVolcanoOrchestratorImpl implements SandboxOrchestrator {
             status.setMessage("Failed to query sandbox: " + ex.getMessage());
             log.warn("Failed to query sandbox {}: {}", sandboxId, ex.getMessage());
             return status;
+        }
+    }
+
+    private Instant resolveTerminalAt(Pod pod) {
+        if (pod == null || pod.getStatus() == null) {
+            return null;
+        }
+        Instant latest = latestFinishedAt(pod.getStatus().getInitContainerStatuses(), null);
+        latest = latestFinishedAt(pod.getStatus().getContainerStatuses(), latest);
+        if (latest != null) {
+            return latest;
+        }
+        return null;
+    }
+
+    private Instant latestFinishedAt(List<ContainerStatus> statuses, Instant current) {
+        Instant latest = current;
+        if (statuses == null) {
+            return latest;
+        }
+        for (ContainerStatus status : statuses) {
+            if (status == null || status.getState() == null || status.getState().getTerminated() == null) {
+                continue;
+            }
+            Instant finishedAt = parseKubernetesInstant(status.getState().getTerminated().getFinishedAt());
+            if (finishedAt != null && (latest == null || finishedAt.isAfter(latest))) {
+                latest = finishedAt;
+            }
+        }
+        return latest;
+    }
+
+    private Instant parseKubernetesInstant(String timestamp) {
+        if (!StringUtils.hasText(timestamp)) {
+            return null;
+        }
+        try {
+            return OffsetDateTime.parse(timestamp).toInstant();
+        } catch (RuntimeException ex) {
+            log.warn("Ignoring invalid Kubernetes timestamp: {}", timestamp);
+            return null;
         }
     }
 
@@ -385,10 +459,11 @@ public class K8sVolcanoOrchestratorImpl implements SandboxOrchestrator {
         if (!request.isAllowLegacy()
             && (!StringUtils.hasText(request.getExpectedGeneration())
             || request.getExpectedFenceToken() == null
+            || !StringUtils.hasText(request.getExpectedPodGroupUid())
             || request.getTargetPodCount() == null
             || request.getTargetPodCount() < 0)) {
             return SandboxScaleResult.failed(sandboxId,
-                "expectedGeneration, expectedFenceToken and non-negative targetPodCount are required");
+                "expectedGeneration, expectedFenceToken, expectedPodGroupUid and non-negative targetPodCount are required");
         }
         String resolvedNamespace = resolveNamespace(request.getNamespace());
 
@@ -399,10 +474,26 @@ public class K8sVolcanoOrchestratorImpl implements SandboxOrchestrator {
             if (preconditionError != null) {
                 return SandboxScaleResult.failed(sandboxId, preconditionError);
             }
-            List<Pod> ownedPods = filterOwnedResources(
-                listPodsBySandboxId(resolvedNamespace, sandboxId),
-                destroyRequest
-            );
+            List<Pod> candidatePods = listPodsBySandboxId(resolvedNamespace, sandboxId);
+            List<Pod> ownedPods = filterOwnedResources(candidatePods, destroyRequest);
+            List<ConfigMap> candidateConfigMaps = listManagedConfigMaps(sandboxId, resolvedNamespace);
+            List<ConfigMap> ownedConfigMaps = filterOwnedResources(candidateConfigMaps, destroyRequest);
+            List<Secret> candidateSecrets = listManagedSecrets(sandboxId, resolvedNamespace);
+            List<Secret> ownedSecrets = filterOwnedResources(candidateSecrets, destroyRequest);
+            if (request.isAllowLegacy()
+                && (containsLifecycleManagedResource(candidatePods)
+                    || containsLifecycleManagedResource(candidateConfigMaps)
+                    || containsLifecycleManagedResource(candidateSecrets))) {
+                return SandboxScaleResult.failed(sandboxId,
+                    "legacy scale-down refuses lifecycle-managed sandbox resources");
+            }
+            if (!request.isAllowLegacy()
+                && (hasConflictingManagedResources(candidatePods, ownedPods)
+                    || hasConflictingManagedResources(candidateConfigMaps, ownedConfigMaps)
+                    || hasConflictingManagedResources(candidateSecrets, ownedSecrets))) {
+                return SandboxScaleResult.failed(sandboxId,
+                    "REPAIR_REQUIRED: sandbox resources belong to another lifecycle generation");
+            }
             Pod targetPod = ownedPods.stream()
                 .filter(pod -> podName.equals(pod.getMetadata().getName()))
                 .findFirst()
@@ -411,7 +502,7 @@ public class K8sVolcanoOrchestratorImpl implements SandboxOrchestrator {
                 return SandboxScaleResult.failed(sandboxId, "Pod not found: " + podName);
             }
             List<String> activePods = ownedPods.stream()
-                .filter(this::isActivePod)
+                .filter(K8sVolcanoOrchestratorImpl::isActivePod)
                 .map(pod -> pod.getMetadata().getName())
                 .sorted()
                 .collect(Collectors.toCollection(ArrayList::new));
@@ -420,8 +511,13 @@ public class K8sVolcanoOrchestratorImpl implements SandboxOrchestrator {
             int targetPodCount = request.getTargetPodCount() == null
                 ? Math.max(0, previousCount - (targetIsActive ? 1 : 0))
                 : request.getTargetPodCount();
+            if (!request.isAllowLegacy()
+                && !isScaleDownTargetConsistent(previousCount, targetIsActive, targetPodCount)) {
+                return SandboxScaleResult.failed(sandboxId,
+                    "targetPodCount does not match the observed active Pod inventory");
+            }
 
-            if (previousCount <= 1 && targetPodCount == 0) {
+            if (requiresFullDestroy(previousCount, targetIsActive, targetPodCount)) {
                 SandboxResult destroyResult = destroySandbox(destroyRequest);
                 if (!destroyResult.isSuccess()) {
                     return SandboxScaleResult.failed(sandboxId,
@@ -438,7 +534,7 @@ public class K8sVolcanoOrchestratorImpl implements SandboxOrchestrator {
                     List.of(podName)
                 );
             }
-            if (previousCount <= 1) {
+            if (requiresRepairBeforeScaleDown(previousCount, targetIsActive)) {
                 return SandboxScaleResult.failed(sandboxId,
                     "REPAIR_REQUIRED: refusing to delete the last active pod while targetPodCount is positive");
             }
@@ -475,6 +571,19 @@ public class K8sVolcanoOrchestratorImpl implements SandboxOrchestrator {
         }
     }
 
+    static boolean requiresFullDestroy(int activePodCount,
+                                       boolean targetIsActive,
+                                       int targetPodCount) {
+        return targetPodCount == 0
+            && ((targetIsActive && activePodCount <= 1)
+                || (!targetIsActive && activePodCount == 0));
+    }
+
+    static boolean requiresRepairBeforeScaleDown(int activePodCount, boolean targetIsActive) {
+        return (targetIsActive && activePodCount <= 1)
+            || (!targetIsActive && activePodCount == 0);
+    }
+
     @Override
     public SandboxScaleResult scaleUp(String sandboxId, int targetPodCount, String namespace, SandboxSpec templateSpec) {
         if (!StringUtils.hasText(sandboxId)) {
@@ -486,9 +595,10 @@ public class K8sVolcanoOrchestratorImpl implements SandboxOrchestrator {
         }
         if (templateSpec == null
             || !StringUtils.hasText(templateSpec.getLifecycleGeneration())
-            || templateSpec.getFenceToken() == null) {
+            || templateSpec.getFenceToken() == null
+            || !StringUtils.hasText(templateSpec.getExpectedPodGroupUid())) {
             return SandboxScaleResult.failed(sandboxId,
-                "templateSpec with lifecycleGeneration and fenceToken is required for scale-up");
+                "templateSpec with lifecycleGeneration, fenceToken and expectedPodGroupUid is required for scale-up");
         }
 
         try {
@@ -498,12 +608,20 @@ public class K8sVolcanoOrchestratorImpl implements SandboxOrchestrator {
                 return SandboxScaleResult.failed(sandboxId, preconditionError);
             }
             SandboxDestroyRequest lifecycle = lifecycleRequest(templateSpec, resolvedNamespace);
-            List<Pod> existingPods = filterOwnedResources(
-                listPodsBySandboxId(resolvedNamespace, sandboxId),
-                lifecycle
-            );
+            List<Pod> candidatePods = listPodsBySandboxId(resolvedNamespace, sandboxId);
+            List<Pod> existingPods = filterOwnedResources(candidatePods, lifecycle);
+            List<ConfigMap> candidateConfigMaps = listManagedConfigMaps(sandboxId, resolvedNamespace);
+            List<ConfigMap> ownedConfigMaps = filterOwnedResources(candidateConfigMaps, lifecycle);
+            List<Secret> candidateSecrets = listManagedSecrets(sandboxId, resolvedNamespace);
+            List<Secret> ownedSecrets = filterOwnedResources(candidateSecrets, lifecycle);
+            if (hasConflictingManagedResources(candidatePods, existingPods)
+                || hasConflictingManagedResources(candidateConfigMaps, ownedConfigMaps)
+                || hasConflictingManagedResources(candidateSecrets, ownedSecrets)) {
+                return SandboxScaleResult.failed(sandboxId,
+                    "REPAIR_REQUIRED: sandbox resources belong to another lifecycle generation");
+            }
             List<String> runningPods = existingPods.stream()
-                .filter(this::isActivePod)
+                .filter(K8sVolcanoOrchestratorImpl::isActivePod)
                 .map(pod -> pod.getMetadata().getName())
                 .sorted()
                 .collect(Collectors.toCollection(ArrayList::new));
@@ -512,8 +630,6 @@ public class K8sVolcanoOrchestratorImpl implements SandboxOrchestrator {
                 return SandboxScaleResult.failed(sandboxId,
                     "REPAIR_REQUIRED: PodGroup has no active members; full sandbox rebuild is required");
             }
-            cleanupTerminatedPods(sandboxId, resolvedNamespace, lifecycle);
-            existingPods = filterOwnedResources(listPodsBySandboxId(resolvedNamespace, sandboxId), lifecycle);
             if (targetPodCount <= previousCount) {
                 return SandboxScaleResult.success(
                     sandboxId,
@@ -615,6 +731,7 @@ public class K8sVolcanoOrchestratorImpl implements SandboxOrchestrator {
 
     private GenericKubernetesResource waitForPodGroupReady(String namespace,
                                                             String podGroupName,
+                                                            String expectedSandboxId,
                                                             String expectedGeneration,
                                                             Long expectedFenceToken,
                                                             int timeoutSeconds) {
@@ -624,6 +741,7 @@ public class K8sVolcanoOrchestratorImpl implements SandboxOrchestrator {
             if (podGroup != null) {
                 assertLifecycleMetadata(
                     podGroup.getMetadata(),
+                    expectedSandboxId,
                     expectedGeneration,
                     expectedFenceToken,
                     "PodGroup/" + podGroupName
@@ -662,43 +780,6 @@ public class K8sVolcanoOrchestratorImpl implements SandboxOrchestrator {
             }
         }
         throw new IllegalStateException("Failed to create pod " + pod.getMetadata().getName(), lastException);
-    }
-
-    private void cleanupTerminatedPods(String sandboxId,
-                                       String namespace,
-                                       SandboxDestroyRequest lifecycle) {
-        List<Pod> terminated = filterOwnedResources(listPodsBySandboxId(namespace, sandboxId), lifecycle).stream()
-            .filter(pod -> pod.getStatus() != null)
-            .filter(pod -> {
-                String phase = pod.getStatus().getPhase();
-                return "Succeeded".equalsIgnoreCase(phase) || "Failed".equalsIgnoreCase(phase);
-            })
-            .collect(Collectors.toList());
-        if (terminated.isEmpty()) {
-            return;
-        }
-        for (Pod pod : terminated) {
-            deleteResourceWithUidPrecondition(
-                coreResourcePath(namespace, "pods", pod.getMetadata().getName()),
-                pod.getMetadata(),
-                0L,
-                DeletionPropagation.BACKGROUND
-            );
-        }
-        for (Pod pod : terminated) {
-            if (!waitForResourceGone(
-                () -> kubernetesClient.pods()
-                    .inNamespace(namespace)
-                    .withName(pod.getMetadata().getName())
-                    .get(),
-                pod.getMetadata().getUid(),
-                30
-            )) {
-                throw new IllegalStateException(
-                    "Terminated pod still exists after delete: " + pod.getMetadata().getName()
-                );
-            }
-        }
     }
 
     private String waitFirstScheduledNode(String namespace, List<String> podNames, int timeoutSeconds) {
@@ -986,11 +1067,12 @@ public class K8sVolcanoOrchestratorImpl implements SandboxOrchestrator {
         }
         assertLifecycleMetadata(
             observedPodGroup.getMetadata(),
+            spec.getSandboxId(),
             spec.getLifecycleGeneration(),
             spec.getFenceToken(),
             "PodGroup/" + observedPodGroup.getMetadata().getName()
         );
-        verifyPods(spec, namespace, observedPodGroup, expectedPodNames);
+        verifyPods(spec, namespace, observedPodGroup, expectedPodNames, false);
     }
 
     private void verifyScaledSandbox(SandboxSpec spec,
@@ -1002,19 +1084,26 @@ public class K8sVolcanoOrchestratorImpl implements SandboxOrchestrator {
             || !Objects.equals(podGroup.getMetadata().getUid(), observedPodGroup.getMetadata().getUid())) {
             throw new IllegalStateException("PodGroup changed during scale-up");
         }
-        verifyPods(spec, namespace, observedPodGroup, expectedPodNames);
+        verifyPods(spec, namespace, observedPodGroup, expectedPodNames, true);
     }
 
     private void verifyPods(SandboxSpec spec,
                             String namespace,
                             GenericKubernetesResource podGroup,
-                            List<String> expectedPodNames) {
+                            List<String> expectedPodNames,
+                            boolean allowTerminalExtras) {
         SandboxDestroyRequest lifecycle = lifecycleRequest(spec, namespace);
         List<Pod> observedPods = filterOwnedResources(
             listPodsBySandboxId(namespace, spec.getSandboxId()),
             lifecycle
         );
-        Map<String, Pod> podsByName = observedPods.stream().collect(Collectors.toMap(
+        for (Pod pod : observedPods) {
+            assertPodBelongsToPodGroup(spec, podGroup, pod);
+        }
+        List<Pod> comparedPods = allowTerminalExtras
+            ? activePodsForScaleVerification(observedPods)
+            : observedPods;
+        Map<String, Pod> podsByName = comparedPods.stream().collect(Collectors.toMap(
             pod -> pod.getMetadata().getName(),
             pod -> pod,
             (left, right) -> left,
@@ -1028,24 +1117,32 @@ public class K8sVolcanoOrchestratorImpl implements SandboxOrchestrator {
         }
         for (String podName : expectedPodNames) {
             Pod pod = podsByName.get(podName);
-            assertLifecycleMetadata(
-                pod.getMetadata(),
-                spec.getLifecycleGeneration(),
-                spec.getFenceToken(),
-                "Pod/" + podName
-            );
-            Map<String, String> annotations = pod.getMetadata().getAnnotations();
-            String expectedPodGroupName = podGroup.getMetadata().getName();
-            if (annotations == null
-                || !expectedPodGroupName.equals(annotations.get("scheduling.volcano.sh/group-name"))) {
-                throw new IllegalStateException("Pod/" + podName + " is not attached to the expected PodGroup");
-            }
-            boolean ownedByPodGroup = pod.getMetadata().getOwnerReferences() != null
-                && pod.getMetadata().getOwnerReferences().stream()
-                .anyMatch(owner -> Objects.equals(owner.getUid(), podGroup.getMetadata().getUid()));
-            if (!ownedByPodGroup) {
-                throw new IllegalStateException("Pod/" + podName + " is missing the PodGroup owner reference");
-            }
+            assertPodBelongsToPodGroup(spec, podGroup, pod);
+        }
+    }
+
+    private void assertPodBelongsToPodGroup(SandboxSpec spec,
+                                            GenericKubernetesResource podGroup,
+                                            Pod pod) {
+        String podName = pod.getMetadata().getName();
+        assertLifecycleMetadata(
+            pod.getMetadata(),
+            spec.getSandboxId(),
+            spec.getLifecycleGeneration(),
+            spec.getFenceToken(),
+            "Pod/" + podName
+        );
+        Map<String, String> annotations = pod.getMetadata().getAnnotations();
+        String expectedPodGroupName = podGroup.getMetadata().getName();
+        if (annotations == null
+            || !expectedPodGroupName.equals(annotations.get("scheduling.volcano.sh/group-name"))) {
+            throw new IllegalStateException("Pod/" + podName + " is not attached to the expected PodGroup");
+        }
+        boolean ownedByPodGroup = pod.getMetadata().getOwnerReferences() != null
+            && pod.getMetadata().getOwnerReferences().stream()
+            .anyMatch(owner -> Objects.equals(owner.getUid(), podGroup.getMetadata().getUid()));
+        if (!ownedByPodGroup) {
+            throw new IllegalStateException("Pod/" + podName + " is missing the PodGroup owner reference");
         }
     }
 
@@ -1059,7 +1156,9 @@ public class K8sVolcanoOrchestratorImpl implements SandboxOrchestrator {
             return "PodGroup UID is missing";
         }
         if (request.isAllowLegacy()) {
-            return null;
+            return isLifecycleManagedResource(metadata)
+                ? "legacy destroy refuses lifecycle-managed PodGroup"
+                : null;
         }
         if (!matchesLifecycle(metadata, request)) {
             return "PodGroup generation/fence does not match the destroy request";
@@ -1079,6 +1178,7 @@ public class K8sVolcanoOrchestratorImpl implements SandboxOrchestrator {
         try {
             assertLifecycleMetadata(
                 podGroup.getMetadata(),
+                spec.getSandboxId(),
                 spec.getLifecycleGeneration(),
                 spec.getFenceToken(),
                 "PodGroup/" + podGroup.getMetadata().getName()
@@ -1091,13 +1191,17 @@ public class K8sVolcanoOrchestratorImpl implements SandboxOrchestrator {
             return "REPAIR_REQUIRED: PodGroup UID changed";
         }
         String phase = podGroupPhase(podGroup);
-        if (StringUtils.hasText(phase)
-            && !"Pending".equalsIgnoreCase(phase)
-            && !"Inqueue".equalsIgnoreCase(phase)
-            && !"Running".equalsIgnoreCase(phase)) {
+        if (!isScaleUpPodGroupPhaseHealthy(phase)) {
             return "REPAIR_REQUIRED: PodGroup phase is " + phase;
         }
         return null;
+    }
+
+    static boolean isScaleUpPodGroupPhaseHealthy(String phase) {
+        return StringUtils.hasText(phase)
+            && ("Pending".equalsIgnoreCase(phase)
+                || "Inqueue".equalsIgnoreCase(phase)
+                || "Running".equalsIgnoreCase(phase));
     }
 
     private SandboxDestroyRequest lifecycleRequest(SandboxSpec spec, String namespace) {
@@ -1133,6 +1237,24 @@ public class K8sVolcanoOrchestratorImpl implements SandboxOrchestrator {
             .collect(Collectors.toCollection(ArrayList::new));
     }
 
+    private boolean containsLifecycleManagedResource(List<? extends HasMetadata> resources) {
+        return resources.stream()
+            .anyMatch(resource -> isLifecycleManagedResource(resource.getMetadata()));
+    }
+
+    static boolean isLifecycleManagedResource(ObjectMeta metadata) {
+        Map<String, String> labels = labelsOfStatic(metadata);
+        return labels.containsKey(SandboxLifecycleMetadata.MANAGED)
+            || labels.containsKey(SandboxLifecycleMetadata.SERVICE_ID)
+            || labels.containsKey(SandboxLifecycleMetadata.SANDBOX_ID)
+            || labels.containsKey(SandboxLifecycleMetadata.GENERATION)
+            || labels.containsKey(SandboxLifecycleMetadata.FENCE_TOKEN);
+    }
+
+    private static Map<String, String> labelsOfStatic(ObjectMeta metadata) {
+        return metadata == null || metadata.getLabels() == null ? Map.of() : metadata.getLabels();
+    }
+
     private boolean matchesLifecycle(ObjectMeta metadata, SandboxDestroyRequest request) {
         if (metadata == null) {
             return false;
@@ -1160,19 +1282,18 @@ public class K8sVolcanoOrchestratorImpl implements SandboxOrchestrator {
                 .equals(labels.get(SandboxLifecycleMetadata.FENCE_TOKEN));
     }
 
-    private boolean hasConflictingManagedPods(String namespace,
-                                              SandboxDestroyRequest request,
-                                              List<Pod> ownedPods) {
-        List<String> ownedNames = ownedPods.stream()
-            .filter(pod -> pod.getMetadata() != null)
-            .map(pod -> pod.getMetadata().getName())
+    static boolean hasConflictingManagedResources(List<? extends HasMetadata> candidates,
+                                                  List<? extends HasMetadata> ownedResources) {
+        List<String> ownedUids = ownedResources.stream()
+            .filter(resource -> resource.getMetadata() != null)
+            .map(resource -> resource.getMetadata().getUid())
+            .filter(StringUtils::hasText)
             .collect(Collectors.toList());
-        for (Pod pod : listPodsBySandboxId(namespace, request.getSandboxId())) {
-            ObjectMeta metadata = pod.getMetadata();
-            Map<String, String> labels = labelsOf(metadata);
-            boolean managedForSandbox = "true".equalsIgnoreCase(labels.get(SandboxLifecycleMetadata.MANAGED))
-                && request.getSandboxId().equals(labels.get(SandboxLifecycleMetadata.SERVICE_ID));
-            if (managedForSandbox && !ownedNames.contains(metadata.getName())) {
+        for (HasMetadata resource : candidates) {
+            ObjectMeta metadata = resource.getMetadata();
+            if (metadata == null
+                || !StringUtils.hasText(metadata.getUid())
+                || !ownedUids.contains(metadata.getUid())) {
                 return true;
             }
         }
@@ -1239,20 +1360,10 @@ public class K8sVolcanoOrchestratorImpl implements SandboxOrchestrator {
         long deadline = System.currentTimeMillis() + Math.max(1, timeoutSeconds) * 1000L;
         while (System.currentTimeMillis() < deadline) {
             GenericKubernetesResource podGroup = getPodGroup(namespace, request.getSandboxId());
-            boolean podGroupRemains = podGroup != null
-                && (request.isAllowLegacy() || matchesLifecycle(podGroup.getMetadata(), request));
-            boolean podsRemain = !filterOwnedResources(
-                listPodsBySandboxId(namespace, request.getSandboxId()),
-                request
-            ).isEmpty();
-            boolean configMapsRemain = !filterOwnedResources(
-                listManagedConfigMaps(request.getSandboxId(), namespace),
-                request
-            ).isEmpty();
-            boolean secretsRemain = !filterOwnedResources(
-                listManagedSecrets(request.getSandboxId(), namespace),
-                request
-            ).isEmpty();
+            boolean podGroupRemains = podGroup != null;
+            boolean podsRemain = !listPodsBySandboxId(namespace, request.getSandboxId()).isEmpty();
+            boolean configMapsRemain = !listManagedConfigMaps(request.getSandboxId(), namespace).isEmpty();
+            boolean secretsRemain = !listManagedSecrets(request.getSandboxId(), namespace).isEmpty();
             if (!podGroupRemains && !podsRemain && !configMapsRemain && !secretsRemain) {
                 return true;
             }
@@ -1300,20 +1411,35 @@ public class K8sVolcanoOrchestratorImpl implements SandboxOrchestrator {
     }
 
     private void assertLifecycleMetadata(ObjectMeta metadata,
+                                         String expectedSandboxId,
                                          String expectedGeneration,
                                          Long expectedFenceToken,
                                          String resource) {
-        Map<String, String> labels = labelsOf(metadata);
-        if (!"true".equalsIgnoreCase(labels.get(SandboxLifecycleMetadata.MANAGED))
-            || !StringUtils.hasText(labels.get(SandboxLifecycleMetadata.SERVICE_ID))
-            || !StringUtils.hasText(labels.get(SandboxLifecycleMetadata.SANDBOX_ID))
-            || !Objects.equals(expectedGeneration, labels.get(SandboxLifecycleMetadata.GENERATION))
-            || !Objects.equals(
-                String.valueOf(expectedFenceToken),
-                labels.get(SandboxLifecycleMetadata.FENCE_TOKEN)
-            )) {
+        if (!matchesLifecycleIdentity(
+            metadata, expectedSandboxId, expectedGeneration, expectedFenceToken
+        )) {
             throw new IllegalStateException(resource + " lifecycle metadata mismatch");
         }
+    }
+
+    static boolean matchesLifecycleIdentity(ObjectMeta metadata,
+                                            String expectedSandboxId,
+                                            String expectedGeneration,
+                                            Long expectedFenceToken) {
+        if (!StringUtils.hasText(expectedSandboxId)
+            || !StringUtils.hasText(expectedGeneration)
+            || expectedFenceToken == null) {
+            return false;
+        }
+        Map<String, String> labels = labelsOfStatic(metadata);
+        return "true".equalsIgnoreCase(labels.get(SandboxLifecycleMetadata.MANAGED))
+            && Objects.equals(expectedSandboxId, labels.get(SandboxLifecycleMetadata.SERVICE_ID))
+            && Objects.equals(expectedSandboxId, labels.get(SandboxLifecycleMetadata.SANDBOX_ID))
+            && Objects.equals(expectedGeneration, labels.get(SandboxLifecycleMetadata.GENERATION))
+            && Objects.equals(
+                String.valueOf(expectedFenceToken),
+                labels.get(SandboxLifecycleMetadata.FENCE_TOKEN)
+            );
     }
 
     private Map<String, String> labelsOf(ObjectMeta metadata) {
@@ -1354,13 +1480,26 @@ public class K8sVolcanoOrchestratorImpl implements SandboxOrchestrator {
         return labels;
     }
 
-    private boolean isActivePod(Pod pod) {
+    static List<Pod> activePodsForScaleVerification(List<Pod> pods) {
+        return pods.stream()
+            .filter(K8sVolcanoOrchestratorImpl::isActivePod)
+            .toList();
+    }
+
+    static boolean isActivePod(Pod pod) {
         if (pod == null || pod.getMetadata() == null
             || pod.getMetadata().getDeletionTimestamp() != null) {
             return false;
         }
         String phase = pod.getStatus() == null ? null : pod.getStatus().getPhase();
         return !"Succeeded".equalsIgnoreCase(phase) && !"Failed".equalsIgnoreCase(phase);
+    }
+
+    static boolean isScaleDownTargetConsistent(int previousActiveCount,
+                                               boolean targetIsActive,
+                                               int targetPodCount) {
+        int expected = Math.max(0, previousActiveCount - (targetIsActive ? 1 : 0));
+        return targetPodCount == expected;
     }
 
     private SandboxSpec buildFallbackScaleSpec(String sandboxId, SandboxSpec templateSpec, List<Pod> existingPods, String namespace) {
