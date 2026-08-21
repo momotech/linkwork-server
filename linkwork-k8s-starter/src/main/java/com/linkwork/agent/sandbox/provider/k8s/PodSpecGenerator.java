@@ -2,6 +2,7 @@ package com.linkwork.agent.sandbox.provider.k8s;
 
 import com.linkwork.agent.sandbox.core.model.ResourceSpec;
 import com.linkwork.agent.sandbox.core.model.SandboxMode;
+import com.linkwork.agent.sandbox.core.model.SandboxLifecycleMetadata;
 import com.linkwork.agent.sandbox.core.model.SandboxNaming;
 import com.linkwork.agent.sandbox.core.model.SandboxSpec;
 import com.linkwork.agent.sandbox.core.model.VolumeMountDef;
@@ -29,6 +30,7 @@ import io.fabric8.kubernetes.api.model.VolumeMountBuilder;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
+import java.time.Instant;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -53,6 +55,7 @@ public class PodSpecGenerator {
         labels.put("sandbox-mode", spec.getMode().name().toLowerCase(Locale.ROOT));
         labels.put("pod-mode", spec.getMode().name().toLowerCase(Locale.ROOT));
         labels.putAll(spec.getLabels());
+        addLifecycleLabels(labels, spec);
 
         Map<String, String> annotations = new LinkedHashMap<>();
         if (properties.isCreatePodGroup()) {
@@ -92,6 +95,18 @@ public class PodSpecGenerator {
         }
 
         return builder.build();
+    }
+
+    private void addLifecycleLabels(Map<String, String> labels, SandboxSpec spec) {
+        if (!StringUtils.hasText(spec.getLifecycleGeneration()) || spec.getFenceToken() == null) {
+            return;
+        }
+        labels.put(SandboxLifecycleMetadata.MANAGED, "true");
+        labels.put(SandboxLifecycleMetadata.SERVICE_ID, spec.getSandboxId());
+        labels.put(SandboxLifecycleMetadata.SANDBOX_ID, spec.getSandboxId());
+        labels.put(SandboxLifecycleMetadata.GENERATION, spec.getLifecycleGeneration());
+        labels.put(SandboxLifecycleMetadata.FENCE_TOKEN, String.valueOf(spec.getFenceToken()));
+        labels.put(SandboxLifecycleMetadata.CREATED_AT, String.valueOf(Instant.now().toEpochMilli()));
     }
 
     static String podGroupName(String sandboxId) {

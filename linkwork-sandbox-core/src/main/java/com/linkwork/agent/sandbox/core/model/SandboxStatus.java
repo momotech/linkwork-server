@@ -9,6 +9,9 @@ public class SandboxStatus {
     private String sandboxId;
     private String namespace;
     private String podGroupPhase;
+    private String podGroupUid;
+    private String lifecycleGeneration;
+    private Long fenceToken;
     private Integer totalPods = 0;
     private Integer readyPods = 0;
     private Integer podGroupMinMember = 0;
@@ -42,6 +45,30 @@ public class SandboxStatus {
 
     public void setPodGroupPhase(String podGroupPhase) {
         this.podGroupPhase = podGroupPhase;
+    }
+
+    public String getPodGroupUid() {
+        return podGroupUid;
+    }
+
+    public void setPodGroupUid(String podGroupUid) {
+        this.podGroupUid = podGroupUid;
+    }
+
+    public String getLifecycleGeneration() {
+        return lifecycleGeneration;
+    }
+
+    public void setLifecycleGeneration(String lifecycleGeneration) {
+        this.lifecycleGeneration = lifecycleGeneration;
+    }
+
+    public Long getFenceToken() {
+        return fenceToken;
+    }
+
+    public void setFenceToken(Long fenceToken) {
+        this.fenceToken = fenceToken;
     }
 
     public Integer getTotalPods() {

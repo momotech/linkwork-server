@@ -1,11 +1,13 @@
 package com.linkwork.agent.sandbox.provider.k8s;
 
 import com.linkwork.agent.sandbox.core.model.ResourceSpec;
+import com.linkwork.agent.sandbox.core.model.SandboxLifecycleMetadata;
 import com.linkwork.agent.sandbox.core.model.SandboxNaming;
 import com.linkwork.agent.sandbox.core.model.SandboxSpec;
 import org.springframework.util.StringUtils;
 
 import java.util.HashMap;
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -24,11 +26,19 @@ public class PodGroupSpecGenerator {
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("name", podGroupName);
         metadata.put("namespace", namespace);
-        metadata.put("labels", Map.of(
-            "app", "linkwork-sandbox",
-            "sandbox-id", spec.getSandboxId(),
-            "service-id", spec.getSandboxId()
-        ));
+        Map<String, String> labels = new LinkedHashMap<>();
+        labels.put("app", "linkwork-sandbox");
+        labels.put("sandbox-id", spec.getSandboxId());
+        labels.put("service-id", spec.getSandboxId());
+        if (StringUtils.hasText(spec.getLifecycleGeneration()) && spec.getFenceToken() != null) {
+            labels.put(SandboxLifecycleMetadata.MANAGED, "true");
+            labels.put(SandboxLifecycleMetadata.SERVICE_ID, spec.getSandboxId());
+            labels.put(SandboxLifecycleMetadata.SANDBOX_ID, spec.getSandboxId());
+            labels.put(SandboxLifecycleMetadata.GENERATION, spec.getLifecycleGeneration());
+            labels.put(SandboxLifecycleMetadata.FENCE_TOKEN, String.valueOf(spec.getFenceToken()));
+            labels.put(SandboxLifecycleMetadata.CREATED_AT, String.valueOf(Instant.now().toEpochMilli()));
+        }
+        metadata.put("labels", labels);
         result.put("metadata", metadata);
 
         Map<String, Object> pgSpec = new LinkedHashMap<>();
