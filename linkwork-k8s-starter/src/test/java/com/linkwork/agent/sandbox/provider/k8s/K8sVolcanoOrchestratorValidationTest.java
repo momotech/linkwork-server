@@ -5,9 +5,13 @@ import com.linkwork.agent.sandbox.core.model.SandboxLifecycleMetadata;
 import com.linkwork.agent.sandbox.core.model.SandboxScaleDownRequest;
 import com.linkwork.agent.sandbox.core.model.SandboxScaleResult;
 import com.linkwork.agent.sandbox.core.model.SandboxSpec;
+import com.linkwork.agent.sandbox.core.model.SandboxStatus;
+import io.fabric8.kubernetes.api.model.ConfigMapBuilder;
 import io.fabric8.kubernetes.api.model.ObjectMetaBuilder;
+import io.fabric8.kubernetes.api.model.OwnerReferenceBuilder;
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.PodBuilder;
+import io.fabric8.kubernetes.api.model.SecretBuilder;
 import org.junit.Test;
 
 import java.util.List;
@@ -56,6 +60,16 @@ public class K8sVolcanoOrchestratorValidationTest {
         assertTrue(K8sVolcanoOrchestratorImpl.isLifecycleManagedResource(
             new ObjectMetaBuilder()
                 .withLabels(Map.of(SandboxLifecycleMetadata.MANAGED, "true"))
+                .build()
+        ));
+        assertTrue(K8sVolcanoOrchestratorImpl.isLifecycleManagedResource(
+            new ObjectMetaBuilder()
+                .withOwnerReferences(new OwnerReferenceBuilder()
+                    .withApiVersion("scheduling.volcano.sh/v1beta1")
+                    .withKind("PodGroup")
+                    .withName("svc-svc-1-pg")
+                    .withUid("pod-group-uid")
+                    .build())
                 .build()
         ));
     }
@@ -121,5 +135,48 @@ public class K8sVolcanoOrchestratorValidationTest {
         assertTrue(K8sVolcanoOrchestratorImpl.hasConflictingManagedResources(
             List.of(expected, legacyOrDifferentGeneration), List.of(expected)
         ));
+    }
+
+    @Test
+    public void completeInventoryCountsLegacyConfigMapsAndSecrets() {
+        SandboxStatus status = new SandboxStatus();
+
+        K8sVolcanoOrchestratorImpl.completeResourceInventory(
+            status,
+            false,
+            List.of(new ConfigMapBuilder().withNewMetadata()
+                .withName("svc-1-agent-config")
+                .addToLabels("sandbox-id", "svc-1")
+                .addToLabels("managed-by", "linkwork-k8s-starter")
+                .endMetadata().build()),
+            List.of(new SecretBuilder().withNewMetadata()
+                .withName("svc-1-secret")
+                .addToLabels("sandbox-id", "svc-1")
+                .addToLabels("managed-by", "linkwork-k8s-starter")
+                .endMetadata().build())
+        );
+
+        assertEquals(Integer.valueOf(1), status.getConfigMapCount());
+        assertEquals(Integer.valueOf(1), status.getSecretCount());
+        assertFalse(status.isLifecycleManaged());
+        assertTrue(status.isResourceInventoryComplete());
+    }
+
+    @Test
+    public void completeInventoryIncludesAuxiliaryLifecycleIdentity() {
+        SandboxStatus status = new SandboxStatus();
+
+        K8sVolcanoOrchestratorImpl.completeResourceInventory(
+            status,
+            false,
+            List.of(),
+            List.of(new SecretBuilder().withNewMetadata()
+                .withName("svc-1-secret")
+                .addToLabels(SandboxLifecycleMetadata.GENERATION, "generation-1")
+                .endMetadata().build())
+        );
+
+        assertTrue(status.isLifecycleManaged());
+        assertTrue(status.isResourceInventoryComplete());
     }
 }

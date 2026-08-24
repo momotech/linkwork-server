@@ -330,6 +330,8 @@ public class K8sVolcanoOrchestratorImpl implements SandboxOrchestrator {
 
         try {
             List<Pod> podList = listPodsBySandboxId(status.getNamespace(), sandboxId);
+            List<ConfigMap> configMaps = listManagedConfigMaps(sandboxId, status.getNamespace());
+            List<Secret> secrets = listManagedSecrets(sandboxId, status.getNamespace());
             if (StringUtils.hasText(query.getExpectedGeneration()) || query.getExpectedFenceToken() != null) {
                 podList = podList.stream()
                     .filter(pod -> matchesExpectedLifecycle(pod.getMetadata(), query))
@@ -380,7 +382,6 @@ public class K8sVolcanoOrchestratorImpl implements SandboxOrchestrator {
                     status.setMessage("PodGroup lifecycle precondition mismatch");
                 }
             }
-            status.setLifecycleManaged(lifecycleManaged);
             Map<String, Integer> podGroupCounters = queryPodGroupCounters(sandboxId, status.getNamespace());
             status.setPodGroupPhase(queryPodGroupPhase(sandboxId, status.getNamespace()));
             status.setPodGroupMinMember(podGroupCounters.get("minMember"));
@@ -388,6 +389,7 @@ public class K8sVolcanoOrchestratorImpl implements SandboxOrchestrator {
             status.setPodGroupSucceeded(podGroupCounters.get("succeeded"));
             status.setPodGroupFailed(podGroupCounters.get("failed"));
             status.setPodGroupPending(podGroupCounters.get("pending"));
+            completeResourceInventory(status, lifecycleManaged, configMaps, secrets);
 
             if (pods.isEmpty() && !StringUtils.hasText(status.getMessage())) {
                 status.setMessage("No pods found for sandbox");
@@ -1237,14 +1239,31 @@ public class K8sVolcanoOrchestratorImpl implements SandboxOrchestrator {
             .collect(Collectors.toCollection(ArrayList::new));
     }
 
-    private boolean containsLifecycleManagedResource(List<? extends HasMetadata> resources) {
+    private static boolean containsLifecycleManagedResource(List<? extends HasMetadata> resources) {
         return resources.stream()
             .anyMatch(resource -> isLifecycleManagedResource(resource.getMetadata()));
     }
 
+    static void completeResourceInventory(SandboxStatus status,
+                                          boolean lifecycleManaged,
+                                          List<? extends HasMetadata> configMaps,
+                                          List<? extends HasMetadata> secrets) {
+        List<? extends HasMetadata> safeConfigMaps = configMaps == null ? List.of() : configMaps;
+        List<? extends HasMetadata> safeSecrets = secrets == null ? List.of() : secrets;
+        status.setConfigMapCount(safeConfigMaps.size());
+        status.setSecretCount(safeSecrets.size());
+        status.setLifecycleManaged(lifecycleManaged
+            || containsLifecycleManagedResource(safeConfigMaps)
+            || containsLifecycleManagedResource(safeSecrets));
+        status.setResourceInventoryComplete(true);
+    }
+
     static boolean isLifecycleManagedResource(ObjectMeta metadata) {
         Map<String, String> labels = labelsOfStatic(metadata);
-        return labels.containsKey(SandboxLifecycleMetadata.MANAGED)
+        return (metadata != null
+            && metadata.getOwnerReferences() != null
+            && !metadata.getOwnerReferences().isEmpty())
+            || labels.containsKey(SandboxLifecycleMetadata.MANAGED)
             || labels.containsKey(SandboxLifecycleMetadata.SERVICE_ID)
             || labels.containsKey(SandboxLifecycleMetadata.SANDBOX_ID)
             || labels.containsKey(SandboxLifecycleMetadata.GENERATION)
