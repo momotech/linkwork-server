@@ -17,6 +17,9 @@ public class SandboxStatus {
     private Long fenceToken;
     private Integer totalPods = 0;
     private Integer readyPods = 0;
+    private Integer configMapCount = 0;
+    private Integer secretCount = 0;
+    private boolean resourceInventoryComplete;
     private Integer podGroupMinMember = 0;
     private Integer podGroupRunning = 0;
     private Integer podGroupSucceeded = 0;
@@ -112,6 +115,30 @@ public class SandboxStatus {
 
     public void setReadyPods(Integer readyPods) {
         this.readyPods = readyPods;
+    }
+
+    public Integer getConfigMapCount() {
+        return configMapCount;
+    }
+
+    public void setConfigMapCount(Integer configMapCount) {
+        this.configMapCount = configMapCount;
+    }
+
+    public Integer getSecretCount() {
+        return secretCount;
+    }
+
+    public void setSecretCount(Integer secretCount) {
+        this.secretCount = secretCount;
+    }
+
+    public boolean isResourceInventoryComplete() {
+        return resourceInventoryComplete;
+    }
+
+    public void setResourceInventoryComplete(boolean resourceInventoryComplete) {
+        this.resourceInventoryComplete = resourceInventoryComplete;
     }
 
     public Integer getPodGroupMinMember() {
