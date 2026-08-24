@@ -901,26 +901,70 @@ public class K8sVolcanoOrchestratorImpl implements SandboxOrchestrator {
         if (!StringUtils.hasText(sandboxId)) {
             return List.of();
         }
-        Map<String, Pod> pods = new LinkedHashMap<>();
-        kubernetesClient.pods()
+        List<Pod> sandboxLabelCandidates = kubernetesClient.pods()
             .inNamespace(namespace)
             .withLabel("sandbox-id", sandboxId)
             .list()
-            .getItems()
-            .forEach(pod -> pods.put(pod.getMetadata().getName(), pod));
-        kubernetesClient.pods()
+            .getItems();
+        List<Pod> legacyServiceLabelCandidates = kubernetesClient.pods()
             .inNamespace(namespace)
             .withLabel("service-id", sandboxId)
             .list()
-            .getItems()
-            .forEach(pod -> pods.put(pod.getMetadata().getName(), pod));
-        kubernetesClient.pods()
+            .getItems();
+        List<Pod> lifecycleServiceLabelCandidates = kubernetesClient.pods()
             .inNamespace(namespace)
             .withLabel(SandboxLifecycleMetadata.SERVICE_ID, sandboxId)
             .list()
-            .getItems()
-            .forEach(pod -> pods.put(pod.getMetadata().getName(), pod));
+            .getItems();
+        List<Pod> userServiceLabelCandidates = kubernetesClient.pods()
+            .inNamespace(namespace)
+            .withLabel("user-service-id", sandboxId)
+            .list()
+            .getItems();
+        return mergeSandboxPodCandidates(
+            sandboxId,
+            sandboxLabelCandidates,
+            legacyServiceLabelCandidates,
+            lifecycleServiceLabelCandidates,
+            userServiceLabelCandidates
+        );
+    }
+
+    @SafeVarargs
+    static List<Pod> mergeSandboxPodCandidates(String sandboxId, List<Pod>... candidateGroups) {
+        Map<String, Pod> pods = new LinkedHashMap<>();
+        for (List<Pod> candidates : candidateGroups) {
+            List<Pod> safeCandidates = candidates == null ? List.of() : candidates;
+            for (Pod pod : safeCandidates) {
+                if (belongsToSandbox(pod, sandboxId)) {
+                    pods.put(pod.getMetadata().getName(), pod);
+                }
+            }
+        }
         return new ArrayList<>(pods.values());
+    }
+
+    static boolean belongsToSandbox(Pod pod, String sandboxId) {
+        if (pod == null || pod.getMetadata() == null || !StringUtils.hasText(sandboxId)) {
+            return false;
+        }
+        Map<String, String> labels = labelsOfStatic(pod.getMetadata());
+        List<String> explicitIdentities = new ArrayList<>();
+        for (String key : List.of(
+            SandboxLifecycleMetadata.SANDBOX_ID,
+            SandboxLifecycleMetadata.SERVICE_ID,
+            "sandbox-id",
+            "user-service-id"
+        )) {
+            String value = labels.get(key);
+            if (StringUtils.hasText(value)) {
+                explicitIdentities.add(value);
+            }
+        }
+        if (!explicitIdentities.isEmpty()) {
+            return explicitIdentities.stream().allMatch(sandboxId::equals);
+        }
+        return sandboxId.equals(labels.get("service-id"));
     }
 
     private void createImagePullSecretIfNeeded(SandboxSpec spec, String namespace) {

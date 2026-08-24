@@ -237,4 +237,76 @@ public class K8sVolcanoOrchestratorValidationTest {
         assertEquals(List.of("svc-" + sandboxId + "-token"),
             secrets.stream().map(item -> item.getMetadata().getName()).toList());
     }
+
+    @Test
+    public void legacyServiceLabelCannotAdoptUserIsolatedLifecyclePod() {
+        String roleSandboxId = "1000000000128";
+        String userSandboxId = roleSandboxId + "-u101250";
+        Pod legacyRolePod = new PodBuilder().withNewMetadata()
+            .withName("svc-" + roleSandboxId + "-0").withUid("legacy-role-pod")
+            .addToLabels("service-id", roleSandboxId)
+            .endMetadata().build();
+        Pod managedRolePod = new PodBuilder().withNewMetadata()
+            .withName("svc-" + roleSandboxId + "-1").withUid("managed-role-pod")
+            .addToLabels("service-id", roleSandboxId)
+            .addToLabels("sandbox-id", roleSandboxId)
+            .addToLabels(SandboxLifecycleMetadata.MANAGED, "true")
+            .addToLabels(SandboxLifecycleMetadata.SERVICE_ID, roleSandboxId)
+            .addToLabels(SandboxLifecycleMetadata.SANDBOX_ID, roleSandboxId)
+            .addToLabels(SandboxLifecycleMetadata.GENERATION, "role-generation")
+            .addToLabels(SandboxLifecycleMetadata.FENCE_TOKEN, "1")
+            .endMetadata().build();
+        Pod userIsolatedPod = new PodBuilder().withNewMetadata()
+            .withName("svc-" + userSandboxId + "-0").withUid("user-isolated-pod")
+            .addToLabels("service-id", roleSandboxId)
+            .addToLabels("sandbox-id", userSandboxId)
+            .addToLabels("user-service-id", userSandboxId)
+            .addToLabels(SandboxLifecycleMetadata.MANAGED, "true")
+            .addToLabels(SandboxLifecycleMetadata.SERVICE_ID, userSandboxId)
+            .addToLabels(SandboxLifecycleMetadata.SANDBOX_ID, userSandboxId)
+            .addToLabels(SandboxLifecycleMetadata.GENERATION, "user-generation")
+            .addToLabels(SandboxLifecycleMetadata.FENCE_TOKEN, "2")
+            .endMetadata().build();
+
+        List<Pod> pods = K8sVolcanoOrchestratorImpl.mergeSandboxPodCandidates(
+            roleSandboxId,
+            List.of(managedRolePod),
+            List.of(legacyRolePod, managedRolePod, userIsolatedPod),
+            List.of(managedRolePod)
+        );
+
+        assertEquals(List.of(
+                "svc-" + roleSandboxId + "-1",
+                "svc-" + roleSandboxId + "-0"
+            ),
+            pods.stream().map(item -> item.getMetadata().getName()).toList());
+
+        List<Pod> userPods = K8sVolcanoOrchestratorImpl.mergeSandboxPodCandidates(
+            userSandboxId,
+            List.of(userIsolatedPod),
+            List.of(),
+            List.of(userIsolatedPod),
+            List.of(userIsolatedPod)
+        );
+        assertEquals(List.of("svc-" + userSandboxId + "-0"),
+            userPods.stream().map(item -> item.getMetadata().getName()).toList());
+    }
+
+    @Test
+    public void conflictingExplicitSandboxIdentitiesFailClosed() {
+        Pod conflictingPod = new PodBuilder().withNewMetadata()
+            .withName("svc-conflicting-0")
+            .addToLabels("service-id", "1000000000128")
+            .addToLabels("sandbox-id", "1000000000128-u101250")
+            .addToLabels(SandboxLifecycleMetadata.SERVICE_ID, "1000000000128")
+            .addToLabels(SandboxLifecycleMetadata.SANDBOX_ID, "1000000000128-u101250")
+            .endMetadata().build();
+
+        assertFalse(K8sVolcanoOrchestratorImpl.belongsToSandbox(
+            conflictingPod, "1000000000128"
+        ));
+        assertFalse(K8sVolcanoOrchestratorImpl.belongsToSandbox(
+            conflictingPod, "1000000000128-u101250"
+        ));
+    }
 }
