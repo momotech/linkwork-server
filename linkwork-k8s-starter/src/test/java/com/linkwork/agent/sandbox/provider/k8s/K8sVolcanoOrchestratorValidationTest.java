@@ -6,11 +6,13 @@ import com.linkwork.agent.sandbox.core.model.SandboxScaleDownRequest;
 import com.linkwork.agent.sandbox.core.model.SandboxScaleResult;
 import com.linkwork.agent.sandbox.core.model.SandboxSpec;
 import com.linkwork.agent.sandbox.core.model.SandboxStatus;
+import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.api.model.ConfigMapBuilder;
 import io.fabric8.kubernetes.api.model.ObjectMetaBuilder;
 import io.fabric8.kubernetes.api.model.OwnerReferenceBuilder;
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.PodBuilder;
+import io.fabric8.kubernetes.api.model.Secret;
 import io.fabric8.kubernetes.api.model.SecretBuilder;
 import org.junit.Test;
 
@@ -178,5 +180,61 @@ public class K8sVolcanoOrchestratorValidationTest {
 
         assertTrue(status.isLifecycleManaged());
         assertTrue(status.isResourceInventoryComplete());
+    }
+
+    @Test
+    public void legacyAuxiliaryDiscoveryRequiresHistoricalOwnershipAndExactNames() {
+        String sandboxId = "1000000000108";
+        ConfigMap managed = new ConfigMapBuilder().withNewMetadata()
+            .withName("managed-config").withUid("managed-config-uid")
+            .addToLabels("sandbox-id", sandboxId)
+            .addToLabels("managed-by", "linkwork-k8s-starter")
+            .endMetadata().build();
+        ConfigMap legacy = new ConfigMapBuilder().withNewMetadata()
+            .withName("svc-" + sandboxId + "-agent-config").withUid("legacy-config-uid")
+            .addToLabels("app", "ai-worker-service")
+            .addToLabels("service-id", sandboxId)
+            .endMetadata().build();
+        ConfigMap shared = new ConfigMapBuilder().withNewMetadata()
+            .withName("runner-scripts").withUid("shared-config-uid")
+            .addToLabels("app", "ai-worker-service")
+            .addToLabels("service-id", sandboxId)
+            .endMetadata().build();
+        ConfigMap wrongService = new ConfigMapBuilder().withNewMetadata()
+            .withName("svc-" + sandboxId + "-agent-config").withUid("wrong-service-config-uid")
+            .addToLabels("app", "ai-worker-service")
+            .addToLabels("service-id", "another-service")
+            .endMetadata().build();
+
+        List<ConfigMap> configMaps = K8sVolcanoOrchestratorImpl.mergeSandboxAuxiliaryResources(
+            sandboxId,
+            "svc-" + sandboxId + "-agent-config",
+            List.of(managed, legacy),
+            List.of(legacy, shared, wrongService)
+        );
+
+        assertEquals(List.of("managed-config", "svc-" + sandboxId + "-agent-config"),
+            configMaps.stream().map(item -> item.getMetadata().getName()).toList());
+
+        Secret legacySecret = new SecretBuilder().withNewMetadata()
+            .withName("svc-" + sandboxId + "-token").withUid("legacy-secret-uid")
+            .addToLabels("app", "ai-worker-service")
+            .addToLabels("service-id", sandboxId)
+            .endMetadata().build();
+        Secret wrongName = new SecretBuilder().withNewMetadata()
+            .withName("shared-token").withUid("shared-secret-uid")
+            .addToLabels("app", "ai-worker-service")
+            .addToLabels("service-id", sandboxId)
+            .endMetadata().build();
+
+        List<Secret> secrets = K8sVolcanoOrchestratorImpl.mergeSandboxAuxiliaryResources(
+            sandboxId,
+            "svc-" + sandboxId + "-token",
+            List.<Secret>of(),
+            List.of(legacySecret, wrongName)
+        );
+
+        assertEquals(List.of("svc-" + sandboxId + "-token"),
+            secrets.stream().map(item -> item.getMetadata().getName()).toList());
     }
 }

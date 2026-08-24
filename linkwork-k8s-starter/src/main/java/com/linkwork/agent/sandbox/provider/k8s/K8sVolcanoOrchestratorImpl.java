@@ -1320,21 +1320,88 @@ public class K8sVolcanoOrchestratorImpl implements SandboxOrchestrator {
     }
 
     private List<ConfigMap> listManagedConfigMaps(String sandboxId, String namespace) {
-        return kubernetesClient.configMaps()
+        List<ConfigMap> managedResources = kubernetesClient.configMaps()
             .inNamespace(namespace)
             .withLabel("sandbox-id", sandboxId)
             .withLabel("managed-by", "linkwork-k8s-starter")
             .list()
             .getItems();
+        List<ConfigMap> legacyCandidates = kubernetesClient.configMaps()
+            .inNamespace(namespace)
+            .withLabel("app", "ai-worker-service")
+            .withLabel("service-id", sandboxId)
+            .list()
+            .getItems();
+        return mergeSandboxAuxiliaryResources(
+            sandboxId,
+            "svc-" + sandboxId + "-agent-config",
+            managedResources,
+            legacyCandidates
+        );
     }
 
     private List<Secret> listManagedSecrets(String sandboxId, String namespace) {
-        return kubernetesClient.secrets()
+        List<Secret> managedResources = kubernetesClient.secrets()
             .inNamespace(namespace)
             .withLabel("sandbox-id", sandboxId)
             .withLabel("managed-by", "linkwork-k8s-starter")
             .list()
             .getItems();
+        List<Secret> legacyCandidates = kubernetesClient.secrets()
+            .inNamespace(namespace)
+            .withLabel("app", "ai-worker-service")
+            .withLabel("service-id", sandboxId)
+            .list()
+            .getItems();
+        return mergeSandboxAuxiliaryResources(
+            sandboxId,
+            "svc-" + sandboxId + "-token",
+            managedResources,
+            legacyCandidates
+        );
+    }
+
+    static <T extends HasMetadata> List<T> mergeSandboxAuxiliaryResources(
+        String sandboxId,
+        String legacyResourceName,
+        List<T> managedResources,
+        List<T> legacyCandidates
+    ) {
+        Map<String, T> resources = new LinkedHashMap<>();
+        List<T> safeManagedResources = managedResources == null ? List.of() : managedResources;
+        for (T resource : safeManagedResources) {
+            resources.put(resourceIdentity(resource), resource);
+        }
+        List<T> safeLegacyCandidates = legacyCandidates == null ? List.of() : legacyCandidates;
+        for (T resource : safeLegacyCandidates) {
+            if (isLegacyAuxiliaryResource(resource, sandboxId, legacyResourceName)) {
+                resources.put(resourceIdentity(resource), resource);
+            }
+        }
+        return new ArrayList<>(resources.values());
+    }
+
+    private static boolean isLegacyAuxiliaryResource(HasMetadata resource,
+                                                     String sandboxId,
+                                                     String expectedName) {
+        ObjectMeta metadata = resource == null ? null : resource.getMetadata();
+        if (metadata == null || !expectedName.equals(metadata.getName())) {
+            return false;
+        }
+        Map<String, String> labels = labelsOfStatic(metadata);
+        return "ai-worker-service".equals(labels.get("app"))
+            && sandboxId.equals(labels.get("service-id"));
+    }
+
+    private static String resourceIdentity(HasMetadata resource) {
+        ObjectMeta metadata = resource == null ? null : resource.getMetadata();
+        if (metadata == null) {
+            return "missing-metadata:" + System.identityHashCode(resource);
+        }
+        if (StringUtils.hasText(metadata.getUid())) {
+            return "uid:" + metadata.getUid();
+        }
+        return "name:" + metadata.getName();
     }
 
     private void captureDeleteError(List<String> errors, String resource, Runnable action) {
