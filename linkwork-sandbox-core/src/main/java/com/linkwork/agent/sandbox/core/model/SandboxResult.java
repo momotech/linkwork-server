@@ -18,6 +18,9 @@ public class SandboxResult {
     private String scheduledNode;
     private String errorCode;
     private String errorMessage;
+    private String podGroupUid;
+    private String lifecycleGeneration;
+    private Long fenceToken;
     private Instant timestamp;
 
     public static SandboxResult success(String sandboxId, String podGroupName, List<String> podNames, String scheduledNode) {
@@ -105,6 +108,30 @@ public class SandboxResult {
 
     public void setErrorMessage(String errorMessage) {
         this.errorMessage = errorMessage;
+    }
+
+    public String getPodGroupUid() {
+        return podGroupUid;
+    }
+
+    public void setPodGroupUid(String podGroupUid) {
+        this.podGroupUid = podGroupUid;
+    }
+
+    public String getLifecycleGeneration() {
+        return lifecycleGeneration;
+    }
+
+    public void setLifecycleGeneration(String lifecycleGeneration) {
+        this.lifecycleGeneration = lifecycleGeneration;
+    }
+
+    public Long getFenceToken() {
+        return fenceToken;
+    }
+
+    public void setFenceToken(Long fenceToken) {
+        this.fenceToken = fenceToken;
     }
 
     public Instant getTimestamp() {

@@ -29,7 +29,14 @@ public class SkillAutoConfiguration {
         RestClient.Builder builder = builderProvider.getIfAvailable(RestClient::builder);
         RestClient.Builder configured = builder.baseUrl(baseUrl);
         if (token != null && !token.isBlank()) {
-            configured.defaultHeader("PRIVATE-TOKEN", token);
+            // 与旧版 SkillGitLabService 对齐：deploy-token 走 PRIVATE-TOKEN。
+            if (properties.getGitlab().hasDeployToken()) {
+                configured.defaultHeader("PRIVATE-TOKEN", properties.getGitlab().deployTokenValue());
+            } else if (token.startsWith("glpat-")) {
+                configured.defaultHeader("PRIVATE-TOKEN", token);
+            } else {
+                configured.defaultHeader("Authorization", "Bearer " + token);
+            }
         }
         return configured.build();
     }
