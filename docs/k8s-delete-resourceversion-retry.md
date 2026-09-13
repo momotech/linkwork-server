@@ -9,7 +9,8 @@ records 409 as a permanent cleanup error even if a reconciler later removes it.
 Keep UID and resourceVersion preconditions on every DELETE. Pin the original UID,
 name and namespace. Each call supplies its exact typed getter and lifecycle
 validator. Managed resources must still match managed/service/sandbox labels,
-generation and fence token. PodGroup deletion retains expectedPodGroupUid.
+generation and fence token, plus unchanged discovery ownership labels (including
+sandbox-id and user-service-id). PodGroup deletion retains expectedPodGroupUid.
 Legacy deletion must reject newly managed resources and changes to its original
 ownership labels/references. Scale-down retains all existing admission checks.
 
@@ -44,8 +45,8 @@ artifact and sandbox cleanup behavior. Production rollout is outside this change
 
 JDK 21.0.1 and Maven 3.8.8. The first real HTTP regression failed on the
 master implementation with the exact DELETE 409 precondition message. With the
-fix, the focused reactor passed 31 tests and `mvn clean test` passed 40 tests
-(0 failures/errors/skips). The 13 deletion regression methods exercise multiple
+fix, the focused reactor passed 32 tests and `mvn clean test` passed 41 tests
+(0 failures/errors/skips). The 14 deletion regression methods exercise multiple
 resource/identity variants. `git diff --check` passed.
 
 Commands (JAVA_HOME points to jdk-21.jdk/Contents/Home):

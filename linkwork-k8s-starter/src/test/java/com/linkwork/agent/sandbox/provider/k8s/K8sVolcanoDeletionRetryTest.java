@@ -76,6 +76,17 @@ public class K8sVolcanoDeletionRetryTest {
     }
 
     @Test
+    public void managedDiscoveryIdentityChangesFailClosed() throws Exception {
+        for (String key : List.of("sandbox-id", "user-service-id", "managed-by")) {
+            try (Fixture f = new Fixture("Pod")) {
+                f.refreshed.getMetadata().getLabels().put(key, "another-sandbox");
+                assertFalse(key, f.destroy().isSuccess());
+                assertEquals(key, 1, f.deletes.size());
+            }
+        }
+    }
+
+    @Test
     public void conflictRetryIsBoundedEvenWhenBackgroundCleanupLaterSucceeds() throws Exception {
         try (Fixture f = new Fixture("Pod")) {
             f.conflicts = 10;

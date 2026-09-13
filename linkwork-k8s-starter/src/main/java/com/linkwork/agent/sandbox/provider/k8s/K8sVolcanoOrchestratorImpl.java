@@ -1480,17 +1480,17 @@ public class K8sVolcanoOrchestratorImpl implements SandboxOrchestrator {
                 if (isLifecycleManagedResource(current)) {
                     throw new IllegalStateException(resource + " became lifecycle-managed during delete");
                 }
-                for (String key : List.of("app", "managed-by", "sandbox-id", "service-id", "user-service-id")) {
-                    if (!Objects.equals(labelsOfStatic(expected).get(key), labelsOfStatic(current).get(key))) {
-                        throw new IllegalStateException(resource + " legacy ownership changed during delete: " + key);
-                    }
-                }
             } else {
                 assertLifecycleMetadata(current, request.getSandboxId(), request.getExpectedGeneration(),
                     request.getExpectedFenceToken(), resource);
                 if (podGroup && StringUtils.hasText(request.getExpectedPodGroupUid())
                     && !Objects.equals(request.getExpectedPodGroupUid(), current.getUid())) {
                     throw new IllegalStateException(resource + " UID does not match the destroy request");
+                }
+            }
+            for (String key : List.of("app", "managed-by", "sandbox-id", "service-id", "user-service-id")) {
+                if (!Objects.equals(labelsOfStatic(expected).get(key), labelsOfStatic(current).get(key))) {
+                    throw new IllegalStateException(resource + " ownership changed during delete: " + key);
                 }
             }
             if (!Objects.equals(expected.getOwnerReferences(), current.getOwnerReferences())) {
