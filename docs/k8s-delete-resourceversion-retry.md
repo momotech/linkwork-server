@@ -55,3 +55,21 @@ Commands (JAVA_HOME points to jdk-21.jdk/Contents/Home):
 mvn -pl linkwork-k8s-starter -am test
 mvn clean test
 ```
+
+## Immutable release 1.0.3
+
+Promote the validated implementation at b2e8538748e31aa1ff49728635285c8ecd39d39e
+to the complete 1.0.3 reactor/BOM. Only Maven version metadata and release
+documentation change. Publish to the consumer Nexus releases repository after
+confirming every coordinate is unused; never overwrite a released artifact.
+Record the release source commit/tag and SHA-256 manifest. Download all released
+POMs/JARs and compare with the build inputs. Compare all non-Maven-metadata JAR
+entries with the dev-validated 1.0.3-20260913.173337-2 snapshot.
+
+The General Agent MR must pin 1.0.3, pass its focused tests and clean package,
+and verify that its eight embedded LinkWork JARs match the release manifest.
+This promotion does not trigger a production application deployment.
+
+Release validation: JDK 21.0.1 / Maven 3.8.8 `clean verify` passed all 41 tests.
+All non-Maven-metadata entries in all eight JARs exactly match the dev-validated
+snapshot. Release checksums are recorded in `docs/releases/1.0.3-manifest.json`.
