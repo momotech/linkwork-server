@@ -1,0 +1,104 @@
+{
+  "groupId": "io.linkwork",
+  "version": "1.0.3",
+  "tag": "v1.0.3",
+  "implementationCommit": "b2e8538748e31aa1ff49728635285c8ecd39d39e",
+  "tests": {
+    "tests": 41,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "artifacts": [
+    {
+      "artifactId": "linkwork-server",
+      "extension": "pom",
+      "sha256": "7535ddb8ad5ecc6a0e9d1fdc5ebeb26e7bf91bdf142e1a3e79c3c8602ff3ebb2"
+    },
+    {
+      "artifactId": "linkwork-bom",
+      "extension": "pom",
+      "sha256": "108ce63136fbffd7388109f8dfcc5a7ff9df1c7bd62c360faa4aaf945f404a8b"
+    },
+    {
+      "artifactId": "linkwork-k8s-starter",
+      "extension": "pom",
+      "sha256": "f3a46d37f7d9beb9d746a15f06967b9f7294d9c4b957fbafdb681ae651407d02"
+    },
+    {
+      "artifactId": "linkwork-k8s-starter",
+      "extension": "jar",
+      "sha256": "c295ad6e344b5c2483e6ae71c3f23d1b0ab2004e2631293a03a8be0582a0697f"
+    },
+    {
+      "artifactId": "linkwork-mcp-core",
+      "extension": "pom",
+      "sha256": "db32c51cd2e4ea76fc32ba40114d959eb0af27adc9f532d30a0665ab3e49d6da"
+    },
+    {
+      "artifactId": "linkwork-mcp-core",
+      "extension": "jar",
+      "sha256": "108aa97af645daac18d1255853fffcf9a6eb2ea86b1d03ded8524b1903354369"
+    },
+    {
+      "artifactId": "linkwork-mcp-starter",
+      "extension": "pom",
+      "sha256": "9c73e2d171658136f51b96a9d428ecae797dd7b57a84c0031e26320fd0c10987"
+    },
+    {
+      "artifactId": "linkwork-mcp-starter",
+      "extension": "jar",
+      "sha256": "3b17775a5acb77e1e25231fa247b82953c450447e6f20b208c642f4f1d346bc8"
+    },
+    {
+      "artifactId": "linkwork-sandbox-core",
+      "extension": "pom",
+      "sha256": "41ed014b4a822a9357e4409b43bedf3e18df91a9ade1102e72165385a8aa9af0"
+    },
+    {
+      "artifactId": "linkwork-sandbox-core",
+      "extension": "jar",
+      "sha256": "91daa992f2e2ef2d74931d0acfb3284c70fae86e27f05dc8d2a0ac35ca8279b3"
+    },
+    {
+      "artifactId": "linkwork-skill-core",
+      "extension": "pom",
+      "sha256": "3c1a838a68ae1f2445cb8fd78c1ff52a4d6b9719e2d1f7085d3aebf759c4acdb"
+    },
+    {
+      "artifactId": "linkwork-skill-core",
+      "extension": "jar",
+      "sha256": "1335cc76349529b3ed5bf0f0b38ee1b10178a8f026177cd94b0014181c50a9c5"
+    },
+    {
+      "artifactId": "linkwork-skill-starter",
+      "extension": "pom",
+      "sha256": "73eb18ee79cbff5bff58551a56a066c91e0b52f3a9d8f0847ad63a074a53f266"
+    },
+    {
+      "artifactId": "linkwork-skill-starter",
+      "extension": "jar",
+      "sha256": "b9c5e231c7c92ec633f816783a5033d29a09584646bc06095e30bf0bd240a053"
+    },
+    {
+      "artifactId": "linkwork-storage-core",
+      "extension": "pom",
+      "sha256": "7ca47727ef31c839a0bd71d9ee20bc4135d62d4ea1b4d3b06d8734b7ecb4fc6e"
+    },
+    {
+      "artifactId": "linkwork-storage-core",
+      "extension": "jar",
+      "sha256": "4ec29f932fd62a8e76f8c0ff6fdf546d386fde80317a058b3322f9d42636add9"
+    },
+    {
+      "artifactId": "linkwork-storage-starter",
+      "extension": "pom",
+      "sha256": "260f8fc34b981f9b1fd4d9b91130fbabf1b933147bcd680895269f61d924fc15"
+    },
+    {
+      "artifactId": "linkwork-storage-starter",
+      "extension": "jar",
+      "sha256": "4c87784a11c2c022e34bccfc0d4c2c4e1c1c4c34087b2fed676b75f4f86f2a11"
+    }
+  ]
+}

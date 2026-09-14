@@ -53,6 +53,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -62,6 +63,8 @@ import java.util.stream.Collectors;
 public class K8sVolcanoOrchestratorImpl implements SandboxOrchestrator {
 
     private static final Logger log = LoggerFactory.getLogger(K8sVolcanoOrchestratorImpl.class);
+
+    private static final int MAX_DELETE_ATTEMPTS = 3;
 
     private final KubernetesClient kubernetesClient;
     private final PodGroupSpecGenerator podGroupSpecGenerator;
@@ -253,6 +256,8 @@ public class K8sVolcanoOrchestratorImpl implements SandboxOrchestrator {
                 deleteResourceWithUidPrecondition(
                     podGroupPath(resolvedNamespace, podGroup.getMetadata().getName()),
                     podGroup.getMetadata(),
+                    () -> getPodGroupByName(resolvedNamespace, podGroup.getMetadata().getName()),
+                    deletionIdentityValidator(podGroup.getMetadata(), request, true),
                     request.getGracePeriodSeconds(),
                     DeletionPropagation.FOREGROUND
                 ));
@@ -262,6 +267,8 @@ public class K8sVolcanoOrchestratorImpl implements SandboxOrchestrator {
                 deleteResourceWithUidPrecondition(
                     coreResourcePath(resolvedNamespace, "pods", pod.getMetadata().getName()),
                     pod.getMetadata(),
+                    () -> kubernetesClient.pods().inNamespace(resolvedNamespace).withName(pod.getMetadata().getName()).get(),
+                    deletionIdentityValidator(pod.getMetadata(), request, false),
                     request.getGracePeriodSeconds(),
                     DeletionPropagation.BACKGROUND
                 ));
@@ -271,6 +278,8 @@ public class K8sVolcanoOrchestratorImpl implements SandboxOrchestrator {
                 deleteResourceWithUidPrecondition(
                     coreResourcePath(resolvedNamespace, "configmaps", configMap.getMetadata().getName()),
                     configMap.getMetadata(),
+                    () -> kubernetesClient.configMaps().inNamespace(resolvedNamespace).withName(configMap.getMetadata().getName()).get(),
+                    deletionIdentityValidator(configMap.getMetadata(), request, false),
                     0L,
                     DeletionPropagation.BACKGROUND
                 ));
@@ -280,6 +289,8 @@ public class K8sVolcanoOrchestratorImpl implements SandboxOrchestrator {
                 deleteResourceWithUidPrecondition(
                     coreResourcePath(resolvedNamespace, "secrets", secret.getMetadata().getName()),
                     secret.getMetadata(),
+                    () -> kubernetesClient.secrets().inNamespace(resolvedNamespace).withName(secret.getMetadata().getName()).get(),
+                    deletionIdentityValidator(secret.getMetadata(), request, false),
                     0L,
                     DeletionPropagation.BACKGROUND
                 ));
@@ -544,6 +555,8 @@ public class K8sVolcanoOrchestratorImpl implements SandboxOrchestrator {
             deleteResourceWithUidPrecondition(
                 coreResourcePath(resolvedNamespace, "pods", podName),
                 targetPod.getMetadata(),
+                () -> kubernetesClient.pods().inNamespace(resolvedNamespace).withName(podName).get(),
+                deletionIdentityValidator(targetPod.getMetadata(), destroyRequest, false),
                 0L,
                 DeletionPropagation.BACKGROUND
             );
@@ -1457,29 +1470,98 @@ public class K8sVolcanoOrchestratorImpl implements SandboxOrchestrator {
         }
     }
 
+    private Consumer<ObjectMeta> deletionIdentityValidator(ObjectMeta original,
+                                                           SandboxDestroyRequest request,
+                                                           boolean podGroup) {
+        ObjectMeta expected = new ObjectMetaBuilder(original).build();
+        return current -> {
+            String resource = (podGroup ? "PodGroup/" : "Resource/") + expected.getName();
+            if (request.isAllowLegacy()) {
+                if (isLifecycleManagedResource(current)) {
+                    throw new IllegalStateException(resource + " became lifecycle-managed during delete");
+                }
+            } else {
+                assertLifecycleMetadata(current, request.getSandboxId(), request.getExpectedGeneration(),
+                    request.getExpectedFenceToken(), resource);
+                if (podGroup && StringUtils.hasText(request.getExpectedPodGroupUid())
+                    && !Objects.equals(request.getExpectedPodGroupUid(), current.getUid())) {
+                    throw new IllegalStateException(resource + " UID does not match the destroy request");
+                }
+            }
+            for (String key : List.of("app", "managed-by", "sandbox-id", "service-id", "user-service-id")) {
+                if (!Objects.equals(labelsOfStatic(expected).get(key), labelsOfStatic(current).get(key))) {
+                    throw new IllegalStateException(resource + " ownership changed during delete: " + key);
+                }
+            }
+            if (!Objects.equals(expected.getOwnerReferences(), current.getOwnerReferences())) {
+                throw new IllegalStateException(resource + " owner references changed during delete");
+            }
+        };
+    }
+
     private void deleteResourceWithUidPrecondition(String resourcePath,
                                                    ObjectMeta metadata,
+                                                   Supplier<? extends HasMetadata> getter,
+                                                   Consumer<ObjectMeta> identityValidator,
                                                    Long gracePeriodSeconds,
                                                    DeletionPropagation propagation) {
         if (metadata == null || !StringUtils.hasText(metadata.getUid())) {
-            throw new IllegalStateException("Cannot delete resource without UID precondition");
+            throw new IllegalStateException("Cannot delete " + resourcePath + " without UID precondition");
         }
-        Preconditions preconditions = new Preconditions();
-        preconditions.setUid(metadata.getUid());
-        if (StringUtils.hasText(metadata.getResourceVersion())) {
-            preconditions.setResourceVersion(metadata.getResourceVersion());
-        }
-        DeleteOptions options = new DeleteOptions();
-        options.setApiVersion("v1");
-        options.setKind("DeleteOptions");
-        options.setGracePeriodSeconds(gracePeriodSeconds == null ? 0L : gracePeriodSeconds);
-        options.setPropagationPolicy(propagation.toString());
-        options.setPreconditions(preconditions);
-        try {
-            kubernetesClient.raw(resourcePath, "DELETE", options);
-        } catch (KubernetesClientException ex) {
-            if (ex.getCode() != 404) {
-                throw ex;
+        // Pin identity independently of later GET responses, including same-name replacements.
+        String expectedUid = metadata.getUid();
+        String expectedName = metadata.getName();
+        String expectedNamespace = metadata.getNamespace();
+        ObjectMeta current = metadata;
+        for (int attempt = 1; attempt <= MAX_DELETE_ATTEMPTS; attempt++) {
+            if (!StringUtils.hasText(current.getResourceVersion())) {
+                throw new IllegalStateException("Cannot delete " + resourcePath + " without resourceVersion precondition");
+            }
+            identityValidator.accept(current);
+            Preconditions preconditions = new Preconditions();
+            preconditions.setUid(expectedUid);
+            preconditions.setResourceVersion(current.getResourceVersion());
+            DeleteOptions options = new DeleteOptions();
+            options.setApiVersion("v1");
+            options.setKind("DeleteOptions");
+            options.setGracePeriodSeconds(gracePeriodSeconds == null ? 0L : gracePeriodSeconds);
+            options.setPropagationPolicy(propagation.toString());
+            options.setPreconditions(preconditions);
+            try {
+                kubernetesClient.raw(resourcePath, "DELETE", options);
+                return;
+            } catch (KubernetesClientException ex) {
+                if (ex.getCode() == 404) {
+                    return;
+                }
+                if (ex.getCode() != 409) {
+                    throw ex;
+                }
+                HasMetadata refreshed;
+                try {
+                    refreshed = getter.get();
+                } catch (KubernetesClientException refreshError) {
+                    if (refreshError.getCode() == 404) {
+                        return;
+                    }
+                    throw refreshError;
+                }
+                if (refreshed == null) {
+                    return;
+                }
+                current = refreshed.getMetadata();
+                if (current == null || !Objects.equals(expectedUid, current.getUid())) {
+                    throw new IllegalStateException(resourcePath + " UID changed after DELETE conflict; refusing replacement", ex);
+                }
+                if (!Objects.equals(expectedName, current.getName())
+                    || !Objects.equals(expectedNamespace, current.getNamespace())) {
+                    throw new IllegalStateException(resourcePath + " resource address changed after DELETE conflict", ex);
+                }
+                identityValidator.accept(current);
+                if (attempt == MAX_DELETE_ATTEMPTS) {
+                    throw new IllegalStateException("Failed to delete " + resourcePath + " after "
+                        + attempt + " DELETE attempts: repeated 409 Conflict", ex);
+                }
             }
         }
     }
